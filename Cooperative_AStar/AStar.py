@@ -1,6 +1,9 @@
 from GlobalObjs.Graph import Node
+from Benchmark import Warehouse
 import numpy as np
+import os
 from queue import PriorityQueue
+from Visualisations.Vis import Vis
 
 # Based off psuedo code taken from
 # https://www.geeksforgeeks.org/a-search-algorithm/
@@ -28,6 +31,9 @@ class AStarNode(Node):
 
     def man_dist(self, end):
         return abs(self.x - end.x) + abs(self.y - end.y)
+
+    def __eq__(self, other):
+        return self.x == other.x and self.y == other.y
 
     # def calc_f(self, end):
     #     self.f = self.g + self.man_dist(end)
@@ -93,7 +99,7 @@ class AStar:
 
         # start_node.calc_f(end_node) # Not required?
 
-        # Using a queue would be faster
+        # Using a priority queue would be faster -> do later
         open_list = []
         closed_list = []
 
@@ -161,22 +167,9 @@ class AStar:
             closed_list.append(curr_node)
         return None  # I.e. path not found
 
-
-def print_grid(grid, path, start_node, end_node):
-    for j in range(len(grid)):
-        curr_str = "|"
-        for i in range(len(grid[0])):
-            curr_cell = " "
-            if AStarNode(None, i, j) in path:
-                curr_cell = "X"
-            elif grid[j][i]:
-                curr_cell = "#"
-            if AStarNode(None, i, j) == start_node:
-                curr_cell="S"
-            elif AStarNode(None, i, j) == end_node:
-                curr_cell="E"
-            curr_str += curr_cell
-        print(curr_str + "|")
+    @staticmethod
+    def path_to_coords(path):
+        return [(node.x, node.y) for node in path]
 
 
 def example():
@@ -217,5 +210,61 @@ def example():
     # print(path)
 
 
+def warehouse_example():
+    # workspace_path = "\\".join(os.getcwd().split("\\")[:-1])
+    # # print(workspace_path)
+    # grid = Warehouse.txt_to_grid(workspace_path+"/Benchmark/maps/map_warehouse.txt", simple_layout=True)
+    # start_pos = Warehouse.get_rand_valid_point(grid)
+    # end_pos = Warehouse.get_rand_valid_point(grid)
+    #
+    # path = AStar.find_path(grid, start_pos, end_pos)
+    #
+    # print_grid(grid, path, AStarNode(None, start_pos[0], start_pos[1]),
+    #            AStarNode(None, end_pos[0], end_pos[1]))
+
+    workspace_path = "\\".join(os.getcwd().split("\\")[:-1])
+    # print(workspace_path)
+    grid = Warehouse.txt_to_grid(workspace_path + "/Benchmark/maps/map_warehouse.txt", simple_layout=True)
+    # start_pos = Warehouse.get_rand_valid_point(grid)
+    start_pos = (1, 6)
+    goal_pos = (32, 15)
+    # goal_pos = Warehouse.get_rand_valid_point(grid)
+
+    print(f"start_pos: {start_pos}")
+    print(f"goal_pos: {goal_pos}")
+    path_nodes = AStar.find_path(grid, start_pos, goal_pos)
+    path = AStar.path_to_coords(path_nodes)
+    print(f"Path length: {len(path)}")
+
+    vis = Vis(grid, (1100, 500))
+    vis.draw_start(start_pos)
+    vis.draw_goal(goal_pos)
+    vis.draw_path(path)
+    vis.save_to_png("AStarWarehouse")
+    vis.window.getMouse()
+    #
+    # print(grid)
+    # print(start_pos)
+    # print(end_pos)
+
+
+def print_grid(grid, path, start_node, end_node):
+    for j in range(len(grid)):
+        curr_str = "|"
+        for i in range(len(grid[0])):
+            curr_cell = " "
+            if AStarNode(None, i, j) in path:
+                curr_cell = "X"
+            elif grid[j][i]:
+                curr_cell = "#"
+            if AStarNode(None, i, j) == start_node:
+                curr_cell="S"
+            elif AStarNode(None, i, j) == end_node:
+                curr_cell="E"
+            curr_str += curr_cell
+        print(curr_str + "|")
+
+
 if __name__ == "__main__":
-    example()
+    # example()
+    warehouse_example()

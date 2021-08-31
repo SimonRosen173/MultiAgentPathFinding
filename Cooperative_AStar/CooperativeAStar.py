@@ -48,6 +48,7 @@ class CooperativeAStar:
         # Using a queue would be faster - Optimise in future
         open_list = []
         closed_list = []
+        pos_to_node_map = {(start_node.x, start_node.y): start_node}
 
         open_list.append(start_node)
         # open_q.put(start_node)
@@ -105,8 +106,10 @@ class CooperativeAStar:
                 # 2) If a node with the same position as child is in the open list and has a lower f
                 # than child, skip this child
 
-                tmp_node = CooperativeAStar.get_node_by_pos(open_list, child)
-                if tmp_node and tmp_node.f < child.f:
+                open_node_ind = CooperativeAStar.get_node_ind(open_list, child)
+                # open_node = CooperativeAStar.get_node_by_pos(open_list, child)
+
+                if open_node_ind > -1 and open_list[open_node_ind].f < child.f:
                     continue
 
                 # tmp_list = list(filter(lambda el: child.is_pos_equal(el), open_list))
@@ -118,11 +121,15 @@ class CooperativeAStar:
                 # than child, skip this child, otherwise, add the node to the open list.
                 # Not sure if this is correct? - Check paper
 
-                tmp_node = CooperativeAStar.get_node_by_pos(closed_list, child)
-                if tmp_node and tmp_node.f < child.f:
+                closed_node = CooperativeAStar.get_node_by_pos(closed_list, child)
+                if closed_node and closed_node.f < child.f:
                     continue
                 else:
-                    open_list.append(child)
+                    # pos_to_node_map[(child.x, child.y)] = child
+                    if open_node_ind > -1:
+                        open_list[open_node_ind] = child  # Already exists in list so update
+                    else:
+                        open_list.append(child)
 
                 # tmp_list = list(filter(lambda el: child.is_pos_equal(el), closed_list))
                 # if tmp_list and tmp_list[0].f < child.f:
@@ -145,6 +152,13 @@ class CooperativeAStar:
             self.update_resv_table(curr_path)
             paths.append(curr_path)
         return paths
+
+    @staticmethod
+    def get_node_ind(node_list, node):
+        for i, curr_node in enumerate(node_list):
+            if node.is_pos_equal(curr_node):
+                return i
+        return -1
 
     @staticmethod
     def get_node_by_pos(node_list, node):

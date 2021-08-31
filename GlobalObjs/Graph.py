@@ -28,6 +28,30 @@ class Node:
         # return f"NODE ({self.x},{self.y},{self.t}) : parent = {self.parent}, edges = {str(self.edges)}"
 
 
+class NodeAlt:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.edges = []
+
+    def add_edge(self, neighbour: Node, weight: int):
+        self.edges.append((neighbour, weight))
+
+    def __eq__(self, other):
+        return self.x == other.x and self.y == other.y
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return f"NodeAlt({self.x},{self.y})"
+
+
+class SpaceTimeNode(Node):
+    def __init__(self, parent, x, y):
+        super().__init__(self, parent, x, y)
+
+
 class Graph:
     def __init__(self, head: Node, x_size: int, y_size: int):
         self.head: Node = head
