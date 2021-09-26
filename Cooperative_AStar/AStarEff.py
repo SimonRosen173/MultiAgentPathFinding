@@ -1,4 +1,4 @@
-from GlobalObjs.Graph import SpaceTimeNode
+from GlobalObjs.Graph import Node
 from Benchmark import Warehouse
 import numpy as np
 import os
@@ -9,7 +9,7 @@ from Visualisations.Vis import Vis
 # https://www.geeksforgeeks.org/a-search-algorithm/
 
 
-class AStarNode(SpaceTimeNode):
+class AStarNode(Node):
     def __init__(self, parent, x, y, t=-1):
         super(AStarNode, self).__init__(parent, x, y, t)
         self.h = 0  # heuristic

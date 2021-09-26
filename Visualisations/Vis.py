@@ -5,6 +5,10 @@ import time
 
 
 class Vis:
+    pass
+
+
+class VisGrid:
     def __init__(self, grid, window_dim, border_width=25, line_width=1, tick_time=0.1,
                  agent_color="blue", path_width=3, text_size=20):
         self.grid = grid
@@ -93,7 +97,7 @@ class Vis:
 
             curr_cent = circle.getCenter()
             curr_x, curr_y = curr_cent.x, curr_cent.y
-            Vis.move_to(circle, curr_x, curr_y, x, y)
+            VisGrid.move_to(circle, curr_x, curr_y, x, y)
             time.sleep(self.tick_time)
 
     def draw_path(self, path, all_arrows=False):
@@ -150,6 +154,10 @@ class Vis:
         os.remove(file_name + '.eps')
 
 
+class VisGraph:
+    pass
+
+
 def example():
     grid = [[0]*10 for i in range(10)]
     grid[1][1] = 1
@@ -157,7 +165,7 @@ def example():
     grid[1][3] = 1
     path = [(0, 0), (0, 1), (0, 2), (0, 3)]
 
-    new_vis = Vis(grid, (400, 400), 25, tick_time=0.5)
+    new_vis = VisGrid(grid, (400, 400), 25, tick_time=0.5)
 
     new_vis.draw_start(path[0])
     new_vis.draw_goal(path[-1])
