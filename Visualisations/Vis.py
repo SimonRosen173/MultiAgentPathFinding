@@ -63,7 +63,7 @@ class VisGrid:
         # Obstacles
         for gy in range(self.grid_height):
             for gx in range(self.grid_width):
-                if grid[gy][gx] == 1:
+                if grid[gy][gx] > 0:
                     x = self.border_width + gx * self.tile_size
                     y = self.border_width + gy * self.tile_size
                     rect = Rectangle(Point(x, y), Point(x+self.tile_size, y+self.tile_size))
@@ -82,7 +82,7 @@ class VisGrid:
         obj.move(step_x, step_y)
 
     # Path is a list of (x, y) tuples
-    def animate_path(self, path):
+    def animate_path(self, path, is_pos_xy=True):
         win = self.window
         circle_radius = self.circle_radius
         circle = Circle(Point(-1, -1), circle_radius)
@@ -91,7 +91,10 @@ class VisGrid:
 
         circle.draw(win)
         for pos in path:
-            x, y = self.get_coord_from_grid(pos[0], pos[1])
+            if is_pos_xy:
+                x, y = self.get_coord_from_grid(pos[0], pos[1])
+            else:
+                x, y = self.get_coord_from_grid(pos[1], pos[0])
             x = x + self.tile_size/2
             y = y + self.tile_size/2
 
@@ -170,13 +173,13 @@ def example():
     new_vis.draw_start(path[0])
     new_vis.draw_goal(path[-1])
 
-    # new_vis.window.getMouse()
-    # new_vis.animate_path(path)
+    new_vis.window.getMouse()
+    new_vis.animate_path(path)
 
-    new_vis.draw_path(path)
-    new_vis.save_to_png("test")
+    # new_vis.draw_path(path)
+    # new_vis.save_to_png("test")
 
-    # new_vis.window.getMouse()
+    new_vis.window.getMouse()
     new_vis.window.close()
     # print(grid)
 

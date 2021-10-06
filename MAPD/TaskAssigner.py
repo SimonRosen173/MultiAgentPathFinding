@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Set, Optional
 import random
 from Benchmark import Warehouse
 from MAPD.Agent import *
@@ -25,16 +25,21 @@ class TaskAssigner:
     DROPOFF = 2
     OBSTACLE = 3
 
-    def __init__(self, input_grid, task_frequency=1, max_time_at_droppoff=2, is_printing=False):
+    def __init__(self, input_grid, unreachable_locs: Set, task_frequency=1, max_time_at_droppoff=2, is_printing=False):
         self._pickup_points = []
         self._dropoff_points = []
         self._input_grid = input_grid
         self._grid = [[False]*len(input_grid[0]) for _ in range(len(input_grid))]
+        # self._y_len =
+
+        self._unreachable_locs = unreachable_locs
 
         self._tasks_at_dropoff: List[Task] = []
         self._ready_tasks: List[Task] = []
         self._completed_tasks: List[Task] = []
         self._in_progress_tasks: Dict[Task] = {}
+
+        self.task_history = [] # {"task":task, "agent_id":agent_id}
 
         self._process_input_grid()
 
@@ -54,14 +59,15 @@ class TaskAssigner:
         for y in range(len(input_grid)):
             for x in range(len(input_grid[0])):
                 curr_el = input_grid[y][x]
-                if curr_el == TaskAssigner.PICKUP:
-                    self._pickup_points.append((x,y))
-                    grid[y][x] = True
-                elif curr_el == TaskAssigner.DROPOFF:
-                    self._dropoff_points.append((x,y))
-                    grid[y][x] = True
-                elif curr_el == TaskAssigner.OBSTACLE:
-                    grid[y][x] = True
+                if curr_el not in self._unreachable_locs:
+                    if curr_el == TaskAssigner.PICKUP:
+                        self._pickup_points.append((y, x))
+                        grid[y][x] = True
+                    elif curr_el == TaskAssigner.DROPOFF:
+                        self._dropoff_points.append((y, x))
+                        grid[y][x] = True
+                    elif curr_el == TaskAssigner.OBSTACLE:
+                        grid[y][x] = True
 
         self._grid = grid
 
@@ -95,7 +101,7 @@ class TaskAssigner:
         del self._in_progress_tasks[task.id]
         self._tasks_at_dropoff.append(task)
 
-    def get_ready_task(self):
+    def get_ready_task(self) -> Optional[Task]:
         if len(self._ready_tasks) > 0:
             task = self._ready_tasks.pop(0)
             self._in_progress_tasks[task.id] = task

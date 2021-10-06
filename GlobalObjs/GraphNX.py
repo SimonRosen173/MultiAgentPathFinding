@@ -2,8 +2,11 @@ import networkx as nx
 from matplotlib import pyplot as plt
 from Benchmark import Warehouse
 from networkx.algorithms.shortest_paths.astar import astar_path
+
+from typing import List, Tuple
 import time
 from collections import deque
+
 
 def man_dist(node1, node2):
     return abs(node1[0] - node2[0]) + abs(node1[1] - node2[1])
@@ -18,18 +21,56 @@ class GridGraph:
         # self.G = nx.grid_2d_graph(y_len, x_len)
         self._full_G: nx.Graph = nx.grid_2d_graph(self.y_len, self.x_len)
         self._G: nx.Graph = self._full_G.copy()
-        self._di_G: nx.DiGraph = None
+        # self._di_G: nx.DiGraph = None
 
         self._corridor_to_edge_map = {}  # Maps corridor nodes to corresponding edge in G
+        self._orig_corridor_to_edge_map = {}
+        self._edge_to_corridor_map = {}
+        self._orig_edge_to_corridor_map = {}
         self._access_points = {}
+
+        self._invalid_edges = []
+        self._invalid_nodes = []
+        self._unreachable_nodes = []  # Unreachable 'obstructed' nodes - i.e. start or goal locations that are unreachable
 
         self._proc_obstacles()
         self._proc_corridors()
         self._G_to_weighted()
 
+        self._G = self._G.to_directed()
+
         self._G_to_strong_orient(strong_orient_root)
-        # self.obstacles = []
-        # self.obstacles_removed = False
+        self._proc_corridor_to_edge_map()
+
+        self._find_unreachable_nodes()
+
+        self.G = self._G
+
+    def get_G(self):
+        return self._G
+
+    def get_unreachable_nodes(self):
+        return self._unreachable_nodes
+
+    @staticmethod
+    def _nodes_along_edge(edge):
+        node_1, node_2 = edge
+        nodes = []
+        if node_1[0] == node_2[0]:  # horizontal
+            y = node_1[0]
+            if node_1[1] < node_2[1]:  # left to right
+                nodes = [(y, x) for x in range(node_1[1] + 1, node_2[1])]
+            else:  # right to left
+                nodes = [(y, x) for x in range(node_1[1] - 1, node_2[1], -1)]
+        elif node_1[1] == node_2[1]:  # Vertical
+            x = node_1[1]
+            if node_1[0] < node_2[0]:  # top to bottom -> going down
+                nodes = [(y, x) for y in range(node_1[0] + 1, node_2[0])]
+            else:  # bottom to top -> going up
+                nodes = [(y, x) for y in range(node_1[0] - 1, node_2[0], -1)]
+        else:
+            raise ValueError(f"edge cannot be diagonal. x or y values must match.")
+        return nodes
 
     def _proc_obstacles(self):
         grid = self._grid
@@ -127,31 +168,43 @@ class GridGraph:
                 full_G.nodes[node]['corridor'] = True
             else:
                 full_G.nodes[node]['corridor'] = False
-
         pass
 
     def _proc_corridor_to_edge_map(self):
         for edge in self._G.edges:
+            self._edge_to_corridor_map[edge] = []
             # curr_corridor_nodes = []
             node_1, node_2 = edge
             if node_1[0] == node_2[0]:  # horizontal
+                # wtf = node_1[1] < node_2[1]
                 if node_1[1] < node_2[1]:  # left to right
                     for i in range(node_1[1] + 1, node_2[1]):
-                        self._corridor_to_edge_map[(node_1[0], i)] = edge
-                        # corridor_nodes.append((node_1[0], i))
+                        # self._corridor_to_edge_map[(node_1[0], i)] = edge
+                        # self._edge_to_corridor_map[edge].append((node_1[0], i))
+                        curr_node = (node_1[0], i)
+                        self._corridor_to_edge_map[curr_node] = edge
+                        self._edge_to_corridor_map[edge].append(curr_node)
                 else:  # right to left
                     for i in range(node_1[1] - 1, node_2[1], -1):
-                        self._corridor_to_edge_map[(node_1[0], i)] = edge
-                        # corridor_nodes.append((node_1[0], i))
+                        # self._corridor_to_edge_map[(node_1[0], i)] = edge
+                        # self._edge_to_corridor_map[edge].append((node_1[0], i))
+                        curr_node = (node_1[0], i)
+                        self._corridor_to_edge_map[curr_node] = edge
+                        self._edge_to_corridor_map[edge].append(curr_node)
             else:  # Vertical
                 if node_1[0] < node_2[0]:  # top to bottom -> going down
                     for i in range(node_1[0] + 1, node_2[0]):
-                        self._corridor_to_edge_map[(i, node_1[1])] = edge
-                        # corridor_nodes.append((i, node_1[1]))
+                        curr_node = (i, node_1[1])
+                        self._corridor_to_edge_map[curr_node] = edge
+                        self._edge_to_corridor_map[edge].append(curr_node)
                 else:  # bottom to top -> going up
                     for i in range(node_1[0] - 1, node_2[0], -1):
-                        self._corridor_to_edge_map[(i, node_1[1])] = edge
-                        # corridor_nodes.append((i, node_1[1]))
+                        curr_node = (i, node_1[1])
+                        self._corridor_to_edge_map[curr_node] = edge
+                        self._edge_to_corridor_map[edge].append(curr_node)
+
+        self._orig_corridor_to_edge_map = self._corridor_to_edge_map.copy()
+        self._orig_edge_to_corridor_map = self._edge_to_corridor_map.copy()
 
     def _G_to_weighted(self):
         for edge in self._G.edges:
@@ -159,16 +212,37 @@ class GridGraph:
             target = edge[1]
             self._G[source][target]['weight'] = man_dist(source, target)
 
-        self._di_G = self._G.to_directed()
+    def _find_unreachable_nodes(self):
+        full_G = self._full_G
+        G = self._G
+        corridor_to_edge_map = self._corridor_to_edge_map
+
+        def is_unreachable(node):
+            neighbors_data = [(node, full_G.nodes(data=True)[node]) for node in full_G.neighbors(node)]
+            reachable_neighbors = [node_data[0] for node_data in neighbors_data \
+                                   if node_data[0] in corridor_to_edge_map or node_data[0] in G.nodes]
+            return len(reachable_neighbors) == 0
+
+        obstructed_nodes = [node for node, data in full_G.nodes(data=True) if data['obstructed']==True]
+        unreachable_nodes = set(filter(lambda x: is_unreachable(x), obstructed_nodes))
+        unreachable_nodes = unreachable_nodes.union(set(self._invalid_nodes))
+        for invalid_edge in self._invalid_edges:
+            unreachable_nodes = unreachable_nodes.union(set(self._nodes_along_edge(invalid_edge)))
+
+        self._unreachable_nodes = unreachable_nodes
+
+        # raise NotImplementedError
 
     def _G_to_strong_orient(self, root):
+        assert type(self._G) == nx.DiGraph, "self._G is not a DiGraph"
+
         def path_to_reversed_edges(path):
             edges = []
             for i in range(len(path) - 1):
                 edges.append((path[i + 1], path[i]))
             return edges
 
-        orig_graph = self._di_G
+        orig_graph = self._G
         assert type(orig_graph) == nx.DiGraph
         invalid_nodes = []
         graph = orig_graph.copy()
@@ -203,6 +277,7 @@ class GridGraph:
                             graph.remove_edges_from(p2r_edges_r)
                         except nx.NetworkXNoPath:
                             graph.add_edges_from(p2n_edges_r)
+                            invalid_nodes.append(node)
                             print(f"path_to_root for {node} not found")
 
                     cycle_edges_r = p2n_edges_r + p2r_edges_r
@@ -225,16 +300,124 @@ class GridGraph:
                 # Arbitrarily choosing which edge to remove -> Can do smarter way
                 remove_edges.append(edge)
 
+        # Some of the edges don't have weights -> Probs cause of above code block
+        unweighted_edges = [edge for edge in graph.edges(data="weight", default=-1) if edge[2] < 0]
+        for edge in unweighted_edges:
+            graph.edges[edge[0], edge[1]]['weight'] = man_dist(edge[0], edge[1])
+
         graph.remove_edges_from(remove_edges)
+
+        self._invalid_edges = []
+        for node in invalid_nodes:
+            self._invalid_edges.extend(list(graph.edges(node)))
+
+        # remove invalid nodes
+        graph.remove_nodes_from(invalid_nodes)
+        self._invalid_nodes = invalid_nodes
 
         self._G = graph
 
-    # Temporarily add nodes that connect graph to given pos based off neighbours in _full_G
-    def add_access_points(self, pos):
-        pass
+    def _add_node_on_edge(self, node, edge):
+        # edge (node_1, node_2) -> insert node between node_1 and node_2 and create 2 new edges
+        node_1 = edge[0]
+        node_2 = edge[1]
+        self._G.remove_edge(*edge)
+        self._G.add_node(node, obstructed=False)
+        weighted_edges = [(node_1, node, man_dist(node_1, node)), (node, node_2, man_dist(node, node_2))]
+        self._G.add_weighted_edges_from(weighted_edges)
 
-    def remove_access_points(self, pos):
-        pass
+        self._c2e_split(edge, [(node_1, node), (node, node_2)])
+        # return weighted_edges
+
+    def _remove_node_from_edge(self, node, edge):
+        self._G.remove_node(node)
+        weight = man_dist(edge[0], edge[1])
+        self._G.add_weighted_edges_from([(*edge, weight)])
+
+        edge_1 = (edge[0], node)
+        edge_2 = (node, edge[1])
+        self._c2e_merge([edge_1,  edge_2])
+
+    # Split edge in corridor_to_edge_map into two edges
+    def _c2e_split(self, old_edge, new_edges):
+        assert len(new_edges) == 2, "Length of new_edges must be 2"
+        assert new_edges[0][1] == new_edges[1][0], "new_edges must share common vertex"
+
+        mid_node = new_edges[0][1]
+
+        del self._corridor_to_edge_map[mid_node]
+
+        # Could optimise to use 'nodes_along_old_edge' rather than '_nodes_along_edge' call
+        nodes_along_old_edge = self._edge_to_corridor_map[old_edge]
+
+        del self._edge_to_corridor_map[old_edge]
+
+        # Should optimise this at some point
+        nodes_along_edge_1 = GridGraph._nodes_along_edge(new_edges[0])
+        nodes_along_edge_2 = GridGraph._nodes_along_edge(new_edges[1])
+        self._edge_to_corridor_map[new_edges[0]] = nodes_along_edge_1
+        self._edge_to_corridor_map[new_edges[1]] = nodes_along_edge_2
+
+        for node in nodes_along_edge_1:
+            self._corridor_to_edge_map[node] = new_edges[0]
+
+        for node in nodes_along_edge_2:
+            self._corridor_to_edge_map[node] = new_edges[1]
+
+    # Merge edges in 'edges' in corridor_to_edge_map
+    def _c2e_merge(self, edges: List[Tuple]):
+        assert len(edges) == 2, "Length of edges must be 2"
+        assert edges[0][1] == edges[1][0], "edges must share common vertex"
+
+        mid_node = edges[0][1]
+
+        new_edge = (edges[0][0], edges[1][1])
+        nodes_along_edge_1 = self._edge_to_corridor_map[edges[0]]
+        nodes_along_edge_2 = self._edge_to_corridor_map[edges[1]]
+
+        nodes_along_edge = nodes_along_edge_1.copy()
+        nodes_along_edge.append(mid_node)
+        nodes_along_edge.extend(nodes_along_edge_2)
+        self._edge_to_corridor_map[new_edge] = nodes_along_edge
+
+        del self._edge_to_corridor_map[edges[0]]
+        del self._edge_to_corridor_map[edges[1]]
+
+        for node in nodes_along_edge:
+            self._corridor_to_edge_map[node] = new_edge
+        # self._corridor_to_edge_map[mid_node] = new_edge
+
+    # Temporarily add nodes that connect graph to given pos based off neighbours in _full_G
+    # TODO - Update corridor to edge map
+    def add_access_points(self, node):
+        access_points = self._access_points
+        access_points[node] = {"nodes":[], "edges":[]}
+        self._G.add_node(node, obstructed=True)
+        for neighbor in self._full_G.neighbors(node):
+            neighbor_data = self._full_G.nodes(data=True)[neighbor]
+            is_obstructed = neighbor_data['obstructed']
+            if neighbor in self._G.nodes:
+                pass
+            elif neighbor in self._corridor_to_edge_map:
+                edge = self._corridor_to_edge_map[neighbor]
+                self._add_node_on_edge(neighbor, edge)
+                access_points[node]["nodes"].append(neighbor)
+            else:
+                continue
+
+            access_points[node]["edges"].extend([(node, neighbor), (neighbor, node)])
+
+            self._G.add_weighted_edges_from([(node, neighbor,  1), (neighbor, node,  1)])
+
+        self._access_points = access_points
+
+    # TODO - Update corridor to edge map
+    def remove_access_points(self, node):
+        remove_nodes = self._access_points[node]["nodes"]
+        for remove_node in remove_nodes:
+            # Need to use original corridor_to_edge map
+            self._remove_node_from_edge(remove_node, self._orig_corridor_to_edge_map[remove_node])
+        self._G.remove_node(node)  # I think this should remove all edges corresponding to node and access points
 
     def plot_full_G(self, file_name):
         full_G = self._full_G
@@ -499,7 +682,7 @@ class GridGraph:
 
 
 def example():
-    grid = Warehouse.txt_to_grid("map_warehouse.txt", use_curr_workspace=True)
+    grid = Warehouse.txt_to_grid("map_warehouse_unreachable.txt", use_curr_workspace=True)
 
     # start = time.time()
     grid_graph = GridGraph(grid)

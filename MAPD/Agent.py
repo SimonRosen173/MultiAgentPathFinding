@@ -4,7 +4,7 @@ __all__ = ['generate_n_agents', 'get_ready_agent', 'Agent', 'inc_timestep_all_ag
 
 
 class Agent:
-    def __init__(self, id, start_timestep=0):
+    def __init__(self, id, start_timestep=0, start_loc=(0, 0)):
         self.id = id
 
         self.start_timestep = start_timestep
@@ -17,18 +17,21 @@ class Agent:
         self._path_to_dropoff = []  # Path from pickup point to drop off point
 
         self.curr_path = []
-        self.paths = []  # Depreciated
+
+        self.path_history = []
+        self.task_history = []
 
         self.curr_task = None
         self.tasks_complete = []
 
         self.loc_in_path = -1  # Index of node agent has most recently visited or is currently on
-        self.loc = (-1, -1)
+        self.loc = start_loc
 
     def inc_timestep(self, n=1):
         self.curr_timestep += 1
         if self.curr_task and self.task_end_timestep > self.curr_timestep:
             self.tasks_complete.append(self.curr_task)
+            self.loc = self.curr_path[-1]
             self.curr_task = None
 
     def assign_task(self, task, path):
@@ -39,8 +42,10 @@ class Agent:
         time_of_path = sum([el[1] for el in path])
         self.task_end_timestep = self.task_start_timestep + time_of_path
 
+        self.path_history.append(path)
+        self.task_history.append(task)
         # self.tasks_complete.append(task)
-        self.paths.append(path)
+        # self.paths.append(path)
 
     def is_ready(self):
         return not self.curr_task or self.task_end_timestep > self.curr_timestep
