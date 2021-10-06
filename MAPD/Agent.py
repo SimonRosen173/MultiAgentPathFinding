@@ -22,6 +22,7 @@ class Agent:
         self.task_history = []
 
         self.curr_task = None
+        self.prev_task = None
         self.tasks_complete = []
 
         self.loc_in_path = -1  # Index of node agent has most recently visited or is currently on

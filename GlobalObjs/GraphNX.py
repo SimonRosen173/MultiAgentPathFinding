@@ -329,13 +329,60 @@ class GridGraph:
         self._c2e_split(edge, [(node_1, node), (node, node_2)])
         # return weighted_edges
 
-    def _remove_node_from_edge(self, node, edge):
+    # If node lies between two edges, remove node and connect edges
+    # E.g. remove B from AB and AC
+    # A -> B -> C
+    # becomes
+    # A -> C
+    def _remove_node_from_edges(self, node, edges):
         self._G.remove_node(node)
-        weight = man_dist(edge[0], edge[1])
-        self._G.add_weighted_edges_from([(*edge, weight)])
+        new_edge = (edges[0][0], edges[1][1])
+        weight = man_dist(new_edge[0], new_edge[1])
+        self._G.add_weighted_edges_from([(*new_edge, weight)])
+        self._c2e_merge(edges)
 
-        edge_1 = (edge[0], node)
-        edge_2 = (node, edge[1])
+    def _remove_node_from_edge(self, node):
+        self._G.remove_node(node)
+        orig_edge = self._orig_corridor_to_edge_map[node]
+        nodes_on_orig_edge = self._orig_edge_to_corridor_map[orig_edge]
+        prev_node = None
+        next_node = None
+
+        for i in range(len(nodes_on_orig_edge)):
+            if nodes_on_orig_edge[i] == node:
+                if i != 0:
+                    prev_node = nodes_on_orig_edge[i-1]
+                else:
+                    prev_node = orig_edge[0]
+                if i < len(nodes_on_orig_edge) - 1:
+                    next_node = nodes_on_orig_edge[i+1]
+                else:
+                    next_node = orig_edge[1]
+
+        edge_1 = [None, node]
+        if prev_node in self._corridor_to_edge_map:
+            edge_1[0] = self._corridor_to_edge_map[prev_node][0]
+        elif prev_node in self._G.nodes:
+            edge_1[0] = prev_node
+        else:
+            raise ValueError(f"{prev_node} not in _corridor_to_edge_map or _G.nodes")
+        edge_1 = tuple(edge_1)
+
+        edge_2 = [node, None]
+        if next_node in self._corridor_to_edge_map:
+            edge_2[1] = self._corridor_to_edge_map[next_node][1]
+        elif next_node in self._G.nodes:
+            edge_2[1] = next_node
+        else:
+            raise ValueError(f"{next_node} not in _corridor_to_edge_map or _G.nodes")
+        edge_2 = tuple(edge_2)
+
+        new_edge = (edge_1[0], edge_2[1])
+        weight = man_dist(new_edge[0], new_edge[1])
+        self._G.add_weighted_edges_from([(*new_edge, weight)])
+        #
+        # edge_1 = (edge[0], node)
+        # edge_2 = (node, edge[1])
         self._c2e_merge([edge_1,  edge_2])
 
     # Split edge in corridor_to_edge_map into two edges
@@ -416,10 +463,10 @@ class GridGraph:
         remove_nodes = self._access_points[node]["nodes"]
         for remove_node in remove_nodes:
             # Need to use original corridor_to_edge map
-            self._remove_node_from_edge(remove_node, self._orig_corridor_to_edge_map[remove_node])
+            self._remove_node_from_edge(remove_node)  # , self._orig_corridor_to_edge_map[remove_node])
         self._G.remove_node(node)  # I think this should remove all edges corresponding to node and access points
 
-    def plot_full_G(self, file_name):
+    def plot_full_G(self, file_name, draw_labels=False):
         full_G = self._full_G
         plt.figure(figsize=(15, 15))
         pos = {(x, y): (y, -x) for x, y in full_G.nodes()}
