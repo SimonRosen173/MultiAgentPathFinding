@@ -12,8 +12,34 @@ def man_dist(node1, node2):
     return abs(node1[0] - node2[0]) + abs(node1[1] - node2[1])
 
 
+def plot_graph(graph, file_name, figsize=(15, 15)):
+    full_G = graph
+    plt.figure(figsize=figsize)
+    pos = {(x, y): (y, -x) for x, y in full_G.nodes()}
+
+    # Nodes
+    obstructed_nodes = [node for node, data in full_G.nodes(data=True) if data['obstructed'] is True]
+    unobstructed_nodes = [node for node, data in full_G.nodes(data=True) if data['obstructed'] is False]
+
+    # nx.draw(full_G, pos=pos, nodelist=[])
+    nx.draw_networkx_nodes(full_G, pos=pos, nodelist=obstructed_nodes, node_size=150, node_color='red')
+    nx.draw_networkx_nodes(full_G, pos=pos, nodelist=unobstructed_nodes, node_size=150, node_color='blue')
+
+    # Edges
+    obstructed_edges = [(node_1, node_2) for node_1, node_2, data in full_G.edges(data=True) if
+                        data['obstructed'] == True]
+    unobstructed_edges = [(node_1, node_2) for node_1, node_2, data in full_G.edges(data=True) if
+                          data['obstructed'] == False]
+
+    nx.draw_networkx_edges(full_G, pos=pos, edgelist=obstructed_edges,
+                           edge_color='red')  # , node_size=150, node_color='red')
+    nx.draw_networkx_edges(full_G, pos=pos, edgelist=unobstructed_edges,
+                           edge_color='blue')  # , node_size=150, node_color='blue')
+    plt.savefig(file_name)
+
+
 class GridGraph:
-    def __init__(self, grid, strong_orient_root=(9, 4)):
+    def __init__(self, grid, strong_orient_root=(9, 4), only_full_G=False):
         self._grid = grid
         self.y_len = len(grid)
         self.x_len = len(grid[0])
@@ -34,26 +60,31 @@ class GridGraph:
         self._unreachable_nodes = []  # Unreachable 'obstructed' nodes - i.e. start or goal locations that are unreachable
 
         self._proc_obstacles()
-        self._proc_corridors()
-        self._G_to_weighted()
 
-        self._G = self._G.to_directed()
+        if not only_full_G:
+            self._proc_corridors()
+            self._G_to_weighted()
 
-        self._G_to_strong_orient(strong_orient_root)
-        self._proc_corridor_to_edge_map()
+            self._G = self._G.to_directed()
 
-        self._find_unreachable_nodes()
+            self._G_to_strong_orient(strong_orient_root)
+            self._proc_corridor_to_edge_map()
+
+            self._find_unreachable_nodes()
 
         self.G = self._G
 
     def get_G(self):
         return self._G
 
+    def get_full_G(self):
+        return self._full_G
+
     def get_unreachable_nodes(self):
         return self._unreachable_nodes
 
     @staticmethod
-    def _nodes_along_edge(edge):
+    def nodes_along_edge(edge):
         node_1, node_2 = edge
         nodes = []
         if node_1[0] == node_2[0]:  # horizontal
@@ -227,7 +258,7 @@ class GridGraph:
         unreachable_nodes = set(filter(lambda x: is_unreachable(x), obstructed_nodes))
         unreachable_nodes = unreachable_nodes.union(set(self._invalid_nodes))
         for invalid_edge in self._invalid_edges:
-            unreachable_nodes = unreachable_nodes.union(set(self._nodes_along_edge(invalid_edge)))
+            unreachable_nodes = unreachable_nodes.union(set(self.nodes_along_edge(invalid_edge)))
 
         self._unreachable_nodes = unreachable_nodes
 
@@ -394,14 +425,14 @@ class GridGraph:
 
         del self._corridor_to_edge_map[mid_node]
 
-        # Could optimise to use 'nodes_along_old_edge' rather than '_nodes_along_edge' call
-        nodes_along_old_edge = self._edge_to_corridor_map[old_edge]
+        # Could optimise to use 'nodes_along_old_edge' rather than 'nodes_along_edge' call
+        # nodes_along_old_edge = self._edge_to_corridor_map[old_edge]
 
         del self._edge_to_corridor_map[old_edge]
 
         # Should optimise this at some point
-        nodes_along_edge_1 = GridGraph._nodes_along_edge(new_edges[0])
-        nodes_along_edge_2 = GridGraph._nodes_along_edge(new_edges[1])
+        nodes_along_edge_1 = GridGraph.nodes_along_edge(new_edges[0])
+        nodes_along_edge_2 = GridGraph.nodes_along_edge(new_edges[1])
         self._edge_to_corridor_map[new_edges[0]] = nodes_along_edge_1
         self._edge_to_corridor_map[new_edges[1]] = nodes_along_edge_2
 

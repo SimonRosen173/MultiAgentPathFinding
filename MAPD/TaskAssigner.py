@@ -5,12 +5,14 @@ from MAPD.Agent import *
 
 
 class Task:
-    def __init__(self, id, pickup_point, dropoff_point):
+    def __init__(self, id, pickup_point, dropoff_point, timestep_created):
         self.pickup_point = pickup_point
         self.dropoff_point = dropoff_point
         self.is_at_dropoff = False
         self.time_at_dropoff = 0  # How long task has been at dropoff point
         self.id = id
+        self.timestep_created = timestep_created
+        self.timestep_assigned = -1
 
     def __str__(self):
         return f"Task(id={self.id}, pickup_point={self.pickup_point}, droppoff_point={self.dropoff_point})"
@@ -25,14 +27,17 @@ class TaskAssigner:
     DROPOFF = 2
     OBSTACLE = 3
 
-    def __init__(self, input_grid, unreachable_locs: Set, task_frequency=1, max_time_at_droppoff=2, is_printing=False):
+    def __init__(self, input_grid, unreachable_locs: Optional[Set] = None, task_frequency=1, max_time_at_droppoff=2, is_printing=False):
         self._pickup_points = []
         self._dropoff_points = []
         self._input_grid = input_grid
         self._grid = [[False]*len(input_grid[0]) for _ in range(len(input_grid))]
         # self._y_len =
 
-        self._unreachable_locs = unreachable_locs
+        if unreachable_locs is None:
+            self._unreachable_locs = set()
+        else:
+            self._unreachable_locs = unreachable_locs
 
         self._tasks_at_dropoff: List[Task] = []
         self._ready_tasks: List[Task] = []
@@ -71,7 +76,7 @@ class TaskAssigner:
 
         self._grid = grid
 
-    def _generate_task(self):
+    def _generate_task(self, timestep_created):
         pickup_point_ind = random.randint(0, len(self._pickup_points) - 1)
         dropoff_point_ind = random.randint(0, len(self._dropoff_points) - 1)
 
@@ -84,10 +89,10 @@ class TaskAssigner:
         task_id = self._no_tasks
         self._no_tasks += 1
 
-        new_task = Task(task_id, pickup_point, dropoff_point)
+        new_task = Task(task_id, pickup_point, dropoff_point, timestep_created)
 
         if self._is_printing:
-            print(f"New task created - ID = {new_task.id}, pickup_point = {new_task.pickup_point}, "
+            print(f"New task created @ t = {timestep_created} - ID = {new_task.id}, pickup_point = {new_task.pickup_point}, "
               f"dropoff_point = {new_task.dropoff_point}")
 
         self._ready_tasks.append(new_task)
@@ -122,7 +127,7 @@ class TaskAssigner:
     def increment_timestep(self):
         if self._task_frequency > 0:
             if self._curr_timestep % self._task_frequency == 0:
-                self._generate_task()
+                self._generate_task(self._curr_timestep)
             self._curr_timestep += 1
 
         for i, task in enumerate(self._tasks_at_dropoff):

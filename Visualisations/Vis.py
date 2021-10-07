@@ -103,6 +103,50 @@ class VisGrid:
             VisGrid.move_to(circle, curr_x, curr_y, x, y)
             time.sleep(self.tick_time)
 
+    def animate_multi_path(self, paths, is_pos_xy=True):
+        win = self.window
+        message = Text(Point(20, 10), "0")
+        message.draw(win)
+
+        circle_radius = self.circle_radius
+        circles = [Circle(Point(-1, -1), circle_radius) for _ in range(len(paths))]
+        # circle = Circle(Point(-1, -1), circle_radius)
+        agent_colors = ["red", "green", "blue", "yellow", "orange", "cyan"]
+        # circle.setOutline(self.agent_color)
+        # circle.setFill(self.agent_color)
+
+        for i, circle in enumerate(circles):
+            curr_color = agent_colors[i % len(agent_colors)]
+            circle.setOutline(curr_color)
+            circle.setFill(curr_color)
+            circle.draw(win)
+
+        max_len = max([len(path) for path in paths])
+        for point_ind in range(max_len):
+            message.setText(f"{point_ind}")
+            for agent_ind in range(len(paths)):
+                if point_ind >= len(paths[agent_ind]):
+                    continue
+                circle = circles[agent_ind]
+
+                pos = paths[agent_ind][point_ind]
+                if is_pos_xy:
+                    x, y = self.get_coord_from_grid(pos[0], pos[1])
+                else:
+                    x, y = self.get_coord_from_grid(pos[1], pos[0])
+                x = x + self.tile_size/2
+                y = y + self.tile_size/2
+
+                curr_cent = circle.getCenter()
+                curr_x, curr_y = curr_cent.x, curr_cent.y
+                VisGrid.move_to(circle, curr_x, curr_y, x, y)
+
+            time.sleep(self.tick_time)
+
+    def animate_mapd(self, agents, is_pos_xy=True):
+        # TODO
+        pass
+
     def draw_path(self, path, all_arrows=False):
         win = self.window
         last_x, last_y = self.get_coord_from_grid(path[0][0], path[0][1])
