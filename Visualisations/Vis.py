@@ -2,10 +2,10 @@ from graphics import *
 from PIL import Image
 import os
 import time
+from typing import List, Tuple, Optional, Dict, Set
 
-
-class Vis:
-    pass
+# class Vis:
+#     pass
 
 
 class VisGrid:
@@ -144,7 +144,58 @@ class VisGrid:
             time.sleep(self.tick_time)
 
     def animate_mapd(self, agents, is_pos_xy=True):
-        # TODO
+        win = self.window
+        message = Text(Point(20, 10), "0")
+        message.draw(win)
+
+        circle_radius = self.circle_radius
+        circles = [Circle(Point(-1, -1), circle_radius) for _ in range(len(agents))]
+        agent_colors = ["red", "green", "blue", "yellow", "orange", "cyan"]
+
+        for i, circle in enumerate(circles):
+            curr_color = agent_colors[i % len(agent_colors)]
+            circle.setOutline(curr_color)
+            circle.setFill(curr_color)
+            circle.draw(win)
+
+        # from MAPD.TokenPassing import Agent
+        full_path_dicts = {}
+        for agent in agents:
+            full_path = agent.get_full_path()
+            full_path_dicts[agent.id] = {tup[1]:tup[0] for tup in full_path}
+
+        agent_ids = [agent.id for agent in agents]
+
+        all_t = [list(full_path_dicts[agent.id].keys()) for agent in agents]
+        max_t = max([max(subarr) for subarr in all_t])
+
+        for t in range(max_t + 1):
+            message.setText(f"{t}")
+            for agent_id in agent_ids:
+                curr_path = full_path_dicts[agent_id]
+                if t in curr_path:
+                    circle = circles[agent_id]
+                    pos = curr_path[t]
+
+                    if is_pos_xy:
+                        x, y = self.get_coord_from_grid(pos[0], pos[1])
+                    else:
+                        x, y = self.get_coord_from_grid(pos[1], pos[0])
+                    x = x + self.tile_size/2
+                    y = y + self.tile_size/2
+
+                    curr_cent = circle.getCenter()
+                    curr_x, curr_y = curr_cent.x, curr_cent.y
+                    VisGrid.move_to(circle, curr_x, curr_y, x, y)
+
+            time.sleep(self.tick_time)
+        # all_paths_le = [full_path_dicts[key] for key in full_path_dicts.keys()]
+        # max_t = max([max([]) for path in all_paths])
+
+        # max_t = max([max([tup[1] for tup in full_paths_dict[agent_ind]]) for agent_ind in full_paths_dict.keys()])
+        # max_t = max([[max(full_path_dicts[agent.id].keys())] for agent in agents])
+
+        print(max_t)
         pass
 
     def draw_path(self, path, all_arrows=False):

@@ -26,9 +26,13 @@ def _weight_function(G, weight):
 def cooperative_astar_path(G, sources, targets, heuristic=man_dist, weight="weight",
                            resv_tbl: Optional[Set[Tuple[Tuple[int, int], int]]] = None,
                            # resv_locs - locations reserved from some timestep onwards
-                           resv_locs: Optional[Dict[Tuple[int, int], int]] = None,
+                           resv_locs: Optional[Dict[Tuple[int, int], List[Tuple[int, int]]]] = None,
                            start_t=0) -> Tuple[List[Optional[Optional[List[Tuple[Tuple[int, int], int]]]]], Set]:
     assert len(sources) == len(targets), "Length of sources must equal length of targets"
+
+    orig_resv_tbl = resv_tbl.copy()
+    resv_tbl = resv_tbl.copy()
+    cutoff_t = 500
 
     for source, target in zip(sources, targets):
         if source not in G or target not in G:
@@ -73,6 +77,8 @@ def cooperative_astar_path(G, sources, targets, heuristic=man_dist, weight="weig
         # Maps explored nodes to parent closest to the source.
         explored = {}
         path_found = False
+
+        tmp = (source, start_t) in resv_tbl
 
         while queue and not path_found:
             # Pop the smallest item from queue.
@@ -129,14 +135,27 @@ def cooperative_astar_path(G, sources, targets, heuristic=man_dist, weight="weig
                 else:
                     curr_weight = weight(curnode[0], neighbor, w)
 
-                curr_t = curnode[1] + curr_weight
+                # curr_t = curnode[1] + curr_weight
                 ncost = dist + curr_weight # weight(curnode[0], neighbor, w)
                 # curr_t = ncost
 
+                if curr_t - start_t > cutoff_t:
+                    # raise Exception("Maximum number of timesteps reached.")
+                    print("Maximum number of timesteps reached.")
+                    return None, None
+
                 if (neighbor, curr_t) not in resv_tbl:
                     # I.e. if neighbor is a stationary agent
-                    if neighbor in resv_locs and resv_locs[neighbor] >= curr_t:
-                        continue
+                    if neighbor in resv_locs:
+                        intervals = resv_locs[neighbor]  # Intervals when neighbor is stationary
+                        is_neighbor_valid=True
+                        for interval in intervals:
+                            if interval[0] <= curr_t <= interval[1]:
+                                is_neighbor_valid = False
+                                continue
+
+                        if not is_neighbor_valid:
+                            continue
 
                     if (neighbor, curr_t) in enqueued:
                         qcost, h = enqueued[(neighbor, curr_t)]
@@ -154,6 +173,14 @@ def cooperative_astar_path(G, sources, targets, heuristic=man_dist, weight="weig
 
         if not path_found:
             print(f"Node {target} not reachable from {source} for agent {agent_ind}")
+            # Why?
+            resv_tbl_list = list(orig_resv_tbl)
+            resv_tbl_pos = [el[0] for el in resv_tbl_list]
+            if source in resv_tbl_pos:
+                print(f"Source {source} is in resv_tbl")
+            if target in resv_tbl_pos:
+                print(f"Target {target} is in resv_tbl")
+
             paths.append(None)
             # raise nx.NetworkXNoPath(f"Node {target} not reachable from {source} for agent {agent_ind}")
 
@@ -169,8 +196,12 @@ def main():
     ta.increment_timestep_by_n(100)
     tasks = [ta.get_ready_task() for _ in range(10)]
 
-    sources = [task.pickup_point for task in tasks]
-    targets = [task.dropoff_point for task in tasks]
+    # sources = [task.pickup_point for task in tasks]
+    # targets = [task.dropoff_point for task in tasks]
+    sources = [(0, 20), (0, 15)]
+    targets = [(0, 15), (0, 25)]
+
+    # (0, 26) (0, 15)
     # print(tasks)
 
     resv_tbl = set()

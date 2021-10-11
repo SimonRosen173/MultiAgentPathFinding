@@ -2,6 +2,7 @@ import networkx as nx
 from matplotlib import pyplot as plt
 from Benchmark import Warehouse
 from networkx.algorithms.shortest_paths.astar import astar_path
+from networkx.algorithms.traversal.breadth_first_search import bfs_tree
 
 from typing import List, Tuple
 import time
@@ -12,30 +13,35 @@ def man_dist(node1, node2):
     return abs(node1[0] - node2[0]) + abs(node1[1] - node2[1])
 
 
-def plot_graph(graph, file_name, figsize=(15, 15)):
+def plot_graph(graph, file_name=None, figsize=(15, 15)):
     full_G = graph
     plt.figure(figsize=figsize)
     pos = {(x, y): (y, -x) for x, y in full_G.nodes()}
 
     # Nodes
-    obstructed_nodes = [node for node, data in full_G.nodes(data=True) if data['obstructed'] is True]
-    unobstructed_nodes = [node for node, data in full_G.nodes(data=True) if data['obstructed'] is False]
+    obstructed_nodes = [node for node, data in full_G.nodes(data="obstructed", default=False)
+                        if data is True]
+    unobstructed_nodes = [node for node, data in full_G.nodes(data="obstructed", default=False)
+                          if data is False]
 
     # nx.draw(full_G, pos=pos, nodelist=[])
     nx.draw_networkx_nodes(full_G, pos=pos, nodelist=obstructed_nodes, node_size=150, node_color='red')
     nx.draw_networkx_nodes(full_G, pos=pos, nodelist=unobstructed_nodes, node_size=150, node_color='blue')
 
     # Edges
-    obstructed_edges = [(node_1, node_2) for node_1, node_2, data in full_G.edges(data=True) if
-                        data['obstructed'] == True]
-    unobstructed_edges = [(node_1, node_2) for node_1, node_2, data in full_G.edges(data=True) if
-                          data['obstructed'] == False]
+    obstructed_edges = [(node_1, node_2) for node_1, node_2, data in full_G.edges(data="obstructed", default=False) if
+                        data == True]
+    unobstructed_edges = [(node_1, node_2) for node_1, node_2, data in full_G.edges(data="obstructed", default=False) if
+                          data == False]
 
     nx.draw_networkx_edges(full_G, pos=pos, edgelist=obstructed_edges,
                            edge_color='red')  # , node_size=150, node_color='red')
     nx.draw_networkx_edges(full_G, pos=pos, edgelist=unobstructed_edges,
                            edge_color='blue')  # , node_size=150, node_color='blue')
-    plt.savefig(file_name)
+    # plt.savefig(file_name)
+
+    if file_name is not None:
+        plt.savefig(file_name)
 
 
 class GridGraph:
@@ -102,6 +108,39 @@ class GridGraph:
         else:
             raise ValueError(f"edge cannot be diagonal. x or y values must match.")
         return nodes
+
+    def remove_non_reachable(self):
+        tmp_G = self._full_G.copy()
+        obstructed_nodes = [(y,x) for (y,x), is_obstructed in self._full_G.nodes(data="obstructed")
+                            if is_obstructed]
+        tmp_G.remove_nodes_from(obstructed_nodes)
+        bfs_G = bfs_tree(tmp_G, (0, 0))
+
+        rand_start_x = 6
+
+        storage_locs = [(y,x) for (y,x), is_obstructed in self._full_G.nodes(data="obstructed")
+                        if is_obstructed and x>=rand_start_x]
+        orig_storage_loc_no = len(storage_locs)
+
+        free_locs = [(y,x) for (y,x), is_obstructed in self._full_G.nodes(data="obstructed")
+                     if not is_obstructed and x>=rand_start_x]
+
+        unreachable_storage_locs = []
+        for storage_loc in storage_locs:
+            is_unreachable = True
+            for neighbor in self._full_G.neighbors(storage_loc):
+                if neighbor in bfs_G.nodes:
+                    is_unreachable = False
+                    break
+            if is_unreachable:
+                unreachable_storage_locs.append(storage_loc)
+
+        unreachable_free_locs = list(set(free_locs) - set(bfs_G.nodes))
+
+        self._full_G.remove_nodes_from(unreachable_storage_locs)
+        self._full_G.remove_nodes_from(unreachable_free_locs)
+
+        self._unreachable_nodes = unreachable_storage_locs + unreachable_free_locs
 
     def _proc_obstacles(self):
         grid = self._grid
@@ -524,7 +563,7 @@ class GridGraph:
                                edge_color='blue')  # , node_size=150, node_color='blue')
         plt.savefig(file_name)
 
-    def plot_G(self, file_name, figsize=(15, 15), draw_weights=False):
+    def plot_G(self, file_name=None, figsize=(15, 15), draw_weights=False):
         G = self._G
         plt.figure(figsize=figsize)
         pos = {(x, y): (y, -x) for x, y in G.nodes()}
@@ -537,226 +576,8 @@ class GridGraph:
             labels = {(e[0], e[1]): e[2]['weight'] for e in G.edges(data=True)}
             nx.draw_networkx_edge_labels(G, pos, edge_labels=labels)
 
-        plt.savefig(file_name)
-
-# class GridGraph:
-#     def __init__(self, grid):
-#         self.grid = grid
-#         y_len = len(grid)
-#         x_len = len(grid[0])
-#
-#         # self.G = nx.grid_2d_graph(y_len, x_len)
-#         self._orig_G = nx.grid_2d_graph(y_len, x_len)
-#
-#         self.obstacles = []
-#         self.obstacles_removed = False
-#
-#     def find_obstacles(self):
-#         grid = self.grid
-#         obstacles = []
-#         for y in range(len(grid)):
-#             for x in range(len(grid[0])):
-#                 if grid[y][x]:
-#                     obstacles.append((y, x))
-#         self.obstacles = obstacles
-#         return obstacles
-#
-#     def remove_obstacles(self):
-#         self.obstacles_removed = True
-#         obstacles = []
-#         if self.obstacles:
-#             obstacles = self.obstacles
-#         else:
-#             obstacles = self.find_obstacles()
-#         self.G.remove_nodes_from(obstacles)
-#
-#     @staticmethod
-#     def filter_by_degree(el, min_degree):
-#         pos, degree = el
-#         if degree < min_degree:
-#             return True
-#         else:
-#             return False
-#
-#     def is_corner(self, node):
-#         edge = list(self.G.edges(node))
-#         node1 = edge[0][1]
-#
-#         if len(edge) == 1:
-#             return False
-#
-#         node2 = edge[1][1]
-#         if node1[0] == node2[0] or node1[1] == node2[1]:  # Not corner
-#             return True
-#         else:  # Is Corner
-#             return False
-#
-#     def convert_to_sparse(self):
-#         if not self.obstacles_removed:
-#             self.remove_obstacles()
-#
-#         G = self.G
-#         remove_nodes = list(filter(lambda el: GridGraph.filter_by_degree(el, 3), list(G.degree)))
-#         remove_nodes = [el[0] for el in remove_nodes]
-#         remove_nodes_nc = list(filter(self.is_corner, remove_nodes))
-#         # G.remove_nodes_from(remove_nodes_nc)
-#         seen = set()
-#         new_edges = []
-#
-#         for curr_node in remove_nodes_nc:
-#             if curr_node not in seen:
-#                 seen.add(curr_node)
-#                 curr_edge = list(G.edges(curr_node))
-#                 prev_node = curr_edge[0][1]
-#                 next_node = curr_edge[1][1]
-#
-#                 prev_edge = curr_edge
-#                 next_edge = curr_edge
-#
-#                 while prev_node:
-#                     if prev_node in remove_nodes_nc:  # and prev_node not in seen:
-#                         prev_edge = list(G.edges(prev_node))
-#                         prev_node = prev_edge[0][1]
-#                         seen.add(prev_node)
-#                     else:
-#                         prev_node = None
-#
-#                 while next_node:
-#                     #     print(next_node)
-#                     if next_node in remove_nodes_nc:  # and next_node not in seen:
-#                         next_edge = list(G.edges(next_node))
-#                         next_node = next_edge[1][1]
-#                         seen.add(next_node)
-#                     else:
-#                         next_node = None
-#
-#                 new_edge = [(curr_edge[0][0], prev_edge[0][1]), (curr_edge[0][0], next_edge[1][1])]
-#                 new_edges.append((new_edge[0][1], new_edge[1][1]))
-#
-#         for edge in new_edges:
-#             G.add_edge(edge[0], edge[1])
-#         G.remove_nodes_from(remove_nodes_nc)
-#         self.G = G
-#         return G
-#
-#     def add_weights_man_dist(self):
-#         G = self.G
-#         for edge in G.edges:
-#             source = edge[0]
-#             target = edge[1]
-#             G[source][target]['weight'] = man_dist(source, target)
-#         self.G = G
-#
-#     def convert_to_di_graph(self):
-#         self.G = self.G.to_directed()
-#
-#     @staticmethod
-#     def path_to_edges(path):
-#         edges = []
-#         for i in range(len(path) - 1):
-#             edges.append((path[i], path[i + 1]))
-#         return edges
-#
-#     @staticmethod
-#     def edges_2_way(edges):
-#         new_edges = []
-#         for edge in edges:
-#             new_edges.append(edge)
-#             new_edges.append((edge[1], edge[0]))
-#         return new_edges
-#
-#     @staticmethod
-#     def get_boundary_nodes(inner_graph, outer_graph):
-#         boundary_nodes = set()
-#         for edge in outer_graph.edges():
-#             if edge[0] in inner_graph.nodes() and edge[1] not in inner_graph.nodes():
-#                 boundary_nodes.add(edge[1])
-#             elif edge[1] in inner_graph.nodes() and edge[0] not in inner_graph.nodes():
-#                 boundary_nodes.add(edge[0])
-#         return list(boundary_nodes)
-#
-#     @staticmethod
-#     def get_edges_weights(graph, edges, weight_inc=0):
-#         edges_weights = []
-#         #     graph_edges = graph.edges(data=True)
-#         for edge in edges:
-#             weight = graph.edges[edge]['weight'] + weight_inc
-#             edges_weights.append((edge[0], edge[1], weight))
-#         return edges_weights
-#
-#     # pass
-#     def add_node_along_edge(self, pos1, pos2):
-#         pass
-#
-#     def get_strong_orientation(self, root, weight_inc=0):
-#         di_G = self.G.copy()
-#         new_G = nx.DiGraph()
-#         new_G.add_node(root)
-#
-#         curr_node = root
-#         while curr_node:
-#             # Path from node to root #
-#             path_nodes = astar.astar_path(di_G, curr_node, root, man_dist, weight='weight')
-#
-#             path_edges = GridGraph.path_to_edges(path_nodes)
-#             path_edges_weights = GridGraph.get_edges_weights(di_G, path_edges, weight_inc=weight_inc)
-#             new_G.add_nodes_from(path_nodes)
-#             new_G.add_weighted_edges_from(path_edges_weights)
-#
-#             di_G.remove_edges_from(GridGraph.edges_2_way(path_edges))
-#             di_G.add_weighted_edges_from(path_edges_weights, weight='weight')
-#
-#             # Path from root to node #
-#             path_nodes = astar.astar_path(di_G, root, curr_node, man_dist, weight='weight')
-#
-#             path_edges = GridGraph.path_to_edges(path_nodes)
-#             path_edges_weights = GridGraph.get_edges_weights(di_G, path_edges, weight_inc=weight_inc)
-#             new_G.add_nodes_from(path_nodes)
-#             new_G.add_weighted_edges_from(path_edges_weights)
-#
-#             di_G.remove_edges_from(GridGraph.edges_2_way(path_edges))
-#             di_G.add_weighted_edges_from(path_edges_weights, weight='weight')
-#
-#             boundary_nodes = GridGraph.get_boundary_nodes(new_G, di_G)
-#             #     print(f"Boundary nodes: {boundary_nodes}")
-#             if len(boundary_nodes) > 0:
-#                 curr_node = boundary_nodes[0]
-#             else:
-#                 curr_node = None
-#
-#         return new_G
-#
-#     def find_path_astar(self, start_pos, goal_pos):
-#         G = self.G
-#         # start_node = G.nodes[start_pos]
-#         # goal_node = G.nodes[goal_pos]
-#         return astar.astar_path(self.G, start_pos, goal_pos, heuristic=GridGraph.man_dist_node, weight="weight")
-#
-#     def save_graph_to_png(self, file_name, figsize=(15, 15), draw_weights=False):
-#         G = self.G
-#         plt.figure(figsize=figsize)
-#         pos = {(x, y): (y, -x) for x, y in G.nodes()}
-#         nx.draw(G, pos=pos,
-#                 node_color='lightgreen',
-#                 with_labels=True,
-#                 node_size=200)
-#         if draw_weights:
-#             # Create edge labels # e[2]['weight']
-#             labels = {(e[0], e[1]): e[2]['weight'] for e in G.edges(data=True)}
-#             nx.draw_networkx_edge_labels(G, pos, edge_labels=labels)
-#
-#         plt.savefig(file_name)
-#
-#
-# def get_strong_oriented_graph(grid):
-#     grid_graph = GridGraph(grid)
-#     grid_graph.convert_to_sparse()
-#     grid_graph.add_weights_man_dist()
-#
-#     grid_graph.convert_to_di_graph()
-#     strong_orient_g = grid_graph.get_strong_orientation((0, 0))
-#
-#     return strong_orient_g
+        if file_name is not None:
+            plt.savefig(file_name)
 
 
 def example():

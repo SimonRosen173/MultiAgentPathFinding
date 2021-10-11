@@ -1,6 +1,9 @@
 import random
 import os
 
+import numpy as np
+from typing import List, Tuple, Dict, Set, Optional
+
 
 def print_grid(grid: list):
     for row in grid:
@@ -36,6 +39,26 @@ def txt_to_grid(file_name, simple_layout=False, use_curr_workspace=False):
     return grid
 
 
+def get_uniform_random_grid(shape: Tuple[int, int], num_pickup_locs):
+    # workspace_path = "\\".join(os.getcwd().split("\\")[:-1])
+    abs_path = os.path.dirname(os.path.abspath(__file__))
+    file_name = abs_path + "/maps/droppoff_grid.txt"
+    static_grid = np.array(txt_to_grid(file_name))
+    assert num_pickup_locs < shape[0] * shape[1], "num_pickup_locs must be less than number of elements in created grid"
+    rand_grid = np.zeros(shape, dtype=int)
+    y_len, x_len = shape[0], shape[1]
+    curr_no_locs = 0
+    while curr_no_locs < num_pickup_locs:
+        y = np.random.randint(0, y_len)
+        x = np.random.randint(0, x_len)
+        if rand_grid[y][x] == 0:
+            rand_grid[y][x] = 1
+            curr_no_locs += 1
+    grid = np.concatenate([static_grid, rand_grid], axis=1)
+    # print(np.count_nonzero(grid))
+    return grid.tolist()
+
+
 def get_pickup_points(grid):
     for y in range(grid):
         for x in range(grid[0]):
@@ -57,13 +80,38 @@ def get_rand_valid_point(grid):
     return x, y
 
 
+def main():
+    grid = txt_to_grid("maps/map_warehouse_1.txt", simple_layout=False)
+    # 5 width
+    dropoff_grid = [row[:6] for row in grid]
+    with open("maps/droppoff_grid.txt", "w") as f:
+        f.write("#" * (2+len(dropoff_grid[0])) + "\n")
+        for row in dropoff_grid:
+            row_str = "".join([str(el) for el in row])
+            row_str = "#" + row_str + "#\n"
+            f.write(row_str)
+        f.write("#" * (2+len(dropoff_grid[0])) + "\n")
+    pass
+
+
 if __name__ == "__main__":
-    grid = txt_to_grid("maps/map_warehouse.txt", simple_layout=True)
-    with open("tmp.txt", "w+") as f:
-        f.write("[\n")
-        for row in grid:
-            f.write(str(row) + ",\n")
-        f.write("]")
-    print(grid)
+    # main()
+    grid = txt_to_grid("maps/droppoff_grid.txt")
+    # 560
+    # 22 * 45
+    rand_grid = get_uniform_random_grid((22, 44), 560)
+    print(rand_grid)
+
+    from GlobalObjs.GraphNX import GridGraph, plot_graph
+    grid_graph = GridGraph(rand_grid, only_full_G=True)
+    plot_graph(grid_graph.get_full_G(), "G.png")
+
+    # grid = txt_to_grid("maps/map_warehouse.txt", simple_layout=True)
+    # with open("tmp.txt", "w+") as f:
+    #     f.write("[\n")
+    #     for row in grid:
+    #         f.write(str(row) + ",\n")
+    #     f.write("]")
+    # print(grid)
     # x, y = get_rand_valid_point(grid)
     # print(x, y)
