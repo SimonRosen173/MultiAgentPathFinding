@@ -35,9 +35,9 @@ class VisGrid:
         self.tick_time = tick_time
         self.agent_color = agent_color
 
-        self.draw_grid()
+        self._draw_grid()
 
-    def draw_grid(self):
+    def _draw_grid(self):
         win = self.window
         grid = self.grid
 
@@ -69,6 +69,14 @@ class VisGrid:
                     rect = Rectangle(Point(x, y), Point(x+self.tile_size, y+self.tile_size))
                     rect.setFill("black")
                     rect.draw(win)
+
+    def save_win_to_gif(self, file_name):
+        # saves the current TKinter object in postscript format
+        self.window.postscript(file="image.eps", colormode='color')
+
+        # Convert from eps format to gif format using PIL
+        img = Image.open("image.eps")
+        img.save(file_name, "gif")
 
     def get_coord_from_grid(self, gx, gy):
         x = self.border_width + gx*self.tile_size

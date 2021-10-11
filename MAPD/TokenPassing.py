@@ -305,10 +305,23 @@ def visualise_paths(grid, agents: List[Agent]):
     new_vis.window.getMouse()
 
 
-def main():
-    grid = Warehouse.get_uniform_random_grid((22, 44), 560)
+def benchmark_warehouse():
+    grid = Warehouse.txt_to_grid("map_warehouse_1.txt", use_curr_workspace=True, simple_layout=False)
+    y_len = len(grid)
+    x_len = len(grid[0])
 
-    # grid = Warehouse.txt_to_grid("map_warehouse_1.txt", use_curr_workspace=True, simple_layout=False)
+    non_task_endpoints = [(y, 0) for y in range(y_len)]
+    no_agents = 5
+    start_locs = non_task_endpoints[:no_agents]
+
+    tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, 500, task_frequency=1,
+                      is_logging_collisions=True)
+
+
+def main():
+    # grid = Warehouse.get_uniform_random_grid((22, 44), 560)
+
+    grid = Warehouse.txt_to_grid("map_warehouse_1.txt", use_curr_workspace=True, simple_layout=False)
     y_len = len(grid)
     x_len = len(grid[0])
 
@@ -323,6 +336,10 @@ def main():
     # new_vis.animate_multi_path(full_paths, is_pos_xy=False)
     # new_vis.animate_path(full_paths_dict[0], is_pos_xy=False)
     # new_vis.window.getMouse()
+
+    no_tasks_completed = sum([agent.get_no_tasks_completed() for agent in final_agents])
+
+    print(f"\nNumber of tasks completed: {no_tasks_completed}\n")
 
     for agent in final_agents:
         print(f"############")

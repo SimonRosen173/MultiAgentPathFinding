@@ -1,4 +1,8 @@
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Optional, Set
+from MAPD.TaskAssigner import Task  # Hopefully won't cause circular imports issue
+
+Path = List[Tuple[int, Tuple[int, int]]]
+PathHistory = Dict[int, Tuple[int, Optional[Path], Optional[Path], Optional[Path], bool]]
 
 
 class Agent:
@@ -10,18 +14,18 @@ class Agent:
 
         self._is_avoidance_path = False  # I.e. path to non-task endpoint
 
-        self._curr_task = None
-        self._curr_path = None
-        self._path_to_pickup = None
-        self._path_to_dropoff = None
+        self._curr_task: Optional[Task] = None
+        self._curr_path: Optional[Path] = None
+        self._path_to_pickup: Optional[Path] = None
+        self._path_to_dropoff: Optional[Path] = None
         self._timestep_path_started = -1
 
         self._is_stationary = True  # I.e. following 'trivial path'
 
         self._reached_goal = False
 
-        self.path_history = {}
-        self.task_history = {}
+        self.path_history: PathHistory = {}
+        self.task_history: Dict[int, Optional[Task]] = {}
 
     def move_along_path(self):
         if self._is_stationary or self._reached_goal:
@@ -36,15 +40,15 @@ class Agent:
 
                 if self._is_avoidance_path:
                     self.task_history[self._curr_t] = None
-                    self.path_history[self._curr_t] = (self._timestep_path_started, None, None, self._curr_path)
+                    self.path_history[self._curr_t] = (self._timestep_path_started, None, None, self._curr_path, False)
                 else:
                     self.task_history[self._curr_t] = self._curr_task
-                    self.path_history[self._curr_t] = (self._timestep_path_started, self._path_to_pickup, self._path_to_dropoff, None)
+                    self.path_history[self._curr_t] = (self._timestep_path_started, self._path_to_pickup, self._path_to_dropoff, None, True)
 
                 self._curr_task = None
                 self._timestep_path_started = -1
 
-    def assign_avoidance_path(self, path):
+    def assign_avoidance_path(self, path: Path):
         self._path_to_pickup = None
         self._path_to_dropoff = None
         self._curr_task = None
@@ -61,7 +65,7 @@ class Agent:
         self._is_stationary = False
         self._reached_goal = False
 
-    def assign_task(self, task, path_to_pickup, path_to_dropoff):
+    def assign_task(self, task: Task, path_to_pickup: Path, path_to_dropoff: Path):
         self._path_to_pickup = path_to_pickup
         self._path_to_dropoff = path_to_dropoff
         self._timestep_path_started = self._curr_t
@@ -86,7 +90,8 @@ class Agent:
     def is_ready(self) -> bool:
         return self._is_stationary or self._reached_goal
 
-    def get_full_path(self):
+    # Only for completed paths
+    def get_full_path(self) -> Path:
         path_history = self.path_history
         all_t = list(sorted(path_history.keys()))
         full_path = []
@@ -94,10 +99,15 @@ class Agent:
             curr_path_hist = path_history[t]
             curr_path = []
             # (self._timestep_path_started, self._path_to_pickup, self._path_to_dropoff, None)
-            _, path_to_pickup, path_to_dropoff, avoidance_path = curr_path_hist
+            _, path_to_pickup, path_to_dropoff, avoidance_path, is_task_path = curr_path_hist
             if avoidance_path is None:
                 curr_path = path_to_pickup + path_to_dropoff[1:]
             else:
                 curr_path = avoidance_path
             full_path.extend(curr_path)
         return full_path
+
+    def get_no_tasks_completed(self):
+        completed_tasks = [self.task_history[t] for t in self.task_history.keys() if self.task_history[t] is not None]
+        return len(completed_tasks)
+
