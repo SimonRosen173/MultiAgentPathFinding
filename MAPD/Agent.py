@@ -1,7 +1,7 @@
 from typing import List, Tuple, Dict, Optional, Set
 from MAPD.TaskAssigner import Task  # Hopefully won't cause circular imports issue
 
-Path = List[Tuple[int, Tuple[int, int]]]
+Path = List[Tuple[Tuple[int, int], int]]
 PathHistory = Dict[int, Tuple[int, Optional[Path], Optional[Path], Optional[Path], bool]]
 
 

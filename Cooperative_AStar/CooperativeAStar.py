@@ -175,11 +175,11 @@ def cooperative_astar_path(G, sources, targets, heuristic=man_dist, weight="weig
             print(f"Node {target} not reachable from {source} for agent {agent_ind}")
             # Why?
             resv_tbl_list = list(orig_resv_tbl)
-            resv_tbl_pos = [el[0] for el in resv_tbl_list]
+            resv_tbl_pos = {el[0]: el[1] for el in resv_tbl_list}
             if source in resv_tbl_pos:
-                print(f"Source {source} is in resv_tbl")
+                print(f"Source {source} is in resv_tbl for ({source}, {resv_tbl_pos[source]})")
             if target in resv_tbl_pos:
-                print(f"Target {target} is in resv_tbl")
+                print(f"Target {target} is in resv_tbl for ({target}), {resv_tbl_pos[target]})")
 
             paths.append(None)
             # raise nx.NetworkXNoPath(f"Node {target} not reachable from {source} for agent {agent_ind}")

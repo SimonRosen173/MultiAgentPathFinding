@@ -119,7 +119,7 @@ class VisGrid:
         circle_radius = self.circle_radius
         circles = [Circle(Point(-1, -1), circle_radius) for _ in range(len(paths))]
         # circle = Circle(Point(-1, -1), circle_radius)
-        agent_colors = ["red", "green", "blue", "yellow", "orange", "cyan"]
+        agent_colors = ["red", "green", "blue", "orange", "DarkMagenta", "DarkRed"]  # "yellow", "cyan"]
         # circle.setOutline(self.agent_color)
         # circle.setFill(self.agent_color)
 
@@ -158,7 +158,8 @@ class VisGrid:
 
         circle_radius = self.circle_radius
         circles = [Circle(Point(-1, -1), circle_radius) for _ in range(len(agents))]
-        agent_colors = ["red", "green", "blue", "yellow", "orange", "cyan"]
+        # agent_colors = ["red", "green", "blue", "yellow", "orange", "cyan"]
+        agent_colors = ["red", "green", "blue", "orange", "DarkMagenta", "DarkRed"]  # "yellow", "cyan"]
 
         for i, circle in enumerate(circles):
             curr_color = agent_colors[i % len(agent_colors)]
@@ -171,6 +172,10 @@ class VisGrid:
         for agent in agents:
             full_path = agent.get_full_path()
             full_path_dicts[agent.id] = {tup[1]:tup[0] for tup in full_path}
+
+        task_path_dicts = {}
+        for agent in agents:
+            task_hist = agent.task_history
 
         agent_ids = [agent.id for agent in agents]
 

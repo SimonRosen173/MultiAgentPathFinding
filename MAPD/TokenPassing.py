@@ -13,6 +13,8 @@ import numpy as np
 from numpy import random
 # random.seed(42)
 
+Path = List[Tuple[Tuple[int, int], int]]
+
 
 # NOTE: Token must contain full paths of agents not just current
 class Token:
@@ -23,7 +25,10 @@ class Token:
         self._non_task_endpoints = non_task_endpoints
 
         # each path is a space-time path, i.e. ((0, 0), 1) means agent is at (0, 0) at timestep = 1
-        self._paths: List[List[Tuple[Tuple, int]]] = [[] for _ in range(no_agents)]
+        self._paths: List[Path] = [[] for _ in range(no_agents)]
+        self._all_path_ends: List[List[Tuple[int, int]]] = [[] for _ in range(no_agents)]
+        # self._path_ends = [[((1, 1), 1)]]
+
         # Pos and time interval agents are stationary
         self._stationary_list: List[List[Tuple[Tuple, int, int]]] = [[] for _ in range(no_agents)]
         self._is_stationary_list: List[bool] = [False]*no_agents
@@ -64,6 +69,10 @@ class Token:
 
         self._paths[agent_id].extend(path)
 
+    # Probs make this neater later...
+    def set_path_ends(self, agent_id: int, path_ends: List[Tuple[int, int]]):
+        self._all_path_ends[agent_id] = path_ends
+
     def is_stationary(self, agent_id: int) -> bool:
         return self._is_stationary_list[agent_id]
 
@@ -71,10 +80,16 @@ class Token:
     #     self._paths[agent_ind] = path
     #     self._is_stationary_list[agent_ind] = is_stationary
 
-    def has_path_ending_in(self, locs: List[Tuple]) -> bool:
-        for path in self._paths:
-            if len(path) > 0 and path[-1][0] in locs:
-                return True
+    # Does not work well
+    def has_path_ending_in(self, locs: List[Tuple[int, int]]) -> bool:
+        # for path in self._paths:
+        #     if len(path) > 0 and path[-1][0] in locs:
+        #         return True
+        for path_ends in self._all_path_ends:
+            for loc in locs:
+                if loc in path_ends:
+                    return True
+
         for stat in self._stationary_list:
             last_stationary = stat[-1]
             if last_stationary[0] in locs:
@@ -212,11 +227,13 @@ class TokenPassing:
                                                       resv_locs=resv_locs, start_t=pickup_t)
                     path_to_dropoff = paths[0]
 
+
                     agent.assign_task(min_task, path_to_pickup, path_to_dropoff)
 
                     path = path_to_pickup + path_to_dropoff[1:]
 
                     token.add_to_path(agent.id, path)
+                    token.set_path_ends(agent.id, [min_task.pickup_point, min_task.dropoff_point])
                     # token.update_path(agent.id, path, False)
                 else:
                     is_stationary_valid = True  # if no task has goal at agent's current location
@@ -259,6 +276,7 @@ class TokenPassing:
                         agent.assign_avoidance_path(path)
                         # token.update_path(agent.id, path, False)
                         token.add_to_path(agent.id, path)
+                        token.set_path_ends(agent.id, [goal])
 
                 agent.inc_timestep()
 
@@ -315,21 +333,24 @@ def benchmark_warehouse():
     start_locs = non_task_endpoints[:no_agents]
 
     tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, 500, task_frequency=1,
-                      is_logging_collisions=True)
+                      is_logging_collisions=False)
 
 
 def main():
-    # grid = Warehouse.get_uniform_random_grid((22, 44), 560)
+    num_storage_locs = 560  # 560
+    grid = Warehouse.get_uniform_random_grid((22, 44), num_storage_locs)
 
-    grid = Warehouse.txt_to_grid("map_warehouse_1.txt", use_curr_workspace=True, simple_layout=False)
+    # grid = Warehouse.txt_to_grid("map_warehouse_1.txt", use_curr_workspace=True, simple_layout=False)
     y_len = len(grid)
     x_len = len(grid[0])
 
+    no_agents = 20
+    max_t = 250
+
     non_task_endpoints = [(y, 0) for y in range(y_len)]
-    no_agents = 5
     start_locs = non_task_endpoints[:no_agents]
 
-    tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, 500, task_frequency=1,
+    tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, max_t, task_frequency=1,
                       is_logging_collisions=True)
     final_agents = tp.compute()
 
@@ -346,6 +367,7 @@ def main():
         print(f"############")
         print(f"# AGENT {agent.id:2} #")
         print(f"############")
+        print(f"Tasks Completed: {agent.get_no_tasks_completed()}")
         print(f"Path History: {agent.path_history}")
         print(f"Task History: {agent.task_history}")
         print(f"Current Task: {agent._curr_task}")

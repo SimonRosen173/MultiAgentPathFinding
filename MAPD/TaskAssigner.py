@@ -1,12 +1,12 @@
-from typing import List, Dict, Set, Optional
+from typing import List, Dict, Set, Optional, Tuple
 from numpy import random
 
 
 class Task:
     def __init__(self, id, pickup_point, dropoff_point, timestep_created):
         self.id = id
-        self.pickup_point = pickup_point
-        self.dropoff_point = dropoff_point
+        self.pickup_point: Tuple[int, int] = pickup_point
+        self.dropoff_point: Tuple[int, int] = dropoff_point
         self.timestep_created = timestep_created
         self.timestep_assigned = -1
         self.timestep_completed = -1
