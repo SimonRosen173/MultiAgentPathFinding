@@ -280,7 +280,7 @@ def test():
 
 def graph():
     pop = None
-    with open("populations/pop_90.pkl", "rb") as f:
+    with open("populations/pop_final.pkl", "rb") as f:
         pop = pickle.load(f)
 
     if pop is not None:
@@ -303,7 +303,7 @@ def alt():
 
 
 if __name__ == "__main__":
-    # graph()
-    main()
+    graph()
+    # main()
     # alt()
     # test()
