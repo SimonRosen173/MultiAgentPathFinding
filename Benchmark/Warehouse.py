@@ -39,6 +39,30 @@ def txt_to_grid(file_name, simple_layout=False, use_curr_workspace=False):
     return grid
 
 
+class UniformRandomGrid:
+    def __init__(self):
+        abs_path = os.path.dirname(os.path.abspath(__file__))
+        file_name = abs_path + "/maps/droppoff_grid.txt"
+        self._static_grid = np.array(txt_to_grid(file_name))
+
+    def get_uniform_random_grid(self, shape: Tuple[int, int], num_pickup_locs):
+        # workspace_path = "\\".join(os.getcwd().split("\\")[:-1])
+        static_grid = self._static_grid
+        assert num_pickup_locs < shape[0] * shape[1], "num_pickup_locs must be less than number of elements in created grid"
+        rand_grid = np.zeros(shape, dtype=int)
+        y_len, x_len = shape[0], shape[1]
+        curr_no_locs = 0
+        while curr_no_locs < num_pickup_locs:
+            y = np.random.randint(0, y_len)
+            x = np.random.randint(0, x_len)
+            if rand_grid[y][x] == 0:
+                rand_grid[y][x] = 1
+                curr_no_locs += 1
+        grid = np.concatenate([static_grid, rand_grid], axis=1)
+        # print(np.count_nonzero(grid))
+        return grid  # .tolist()
+
+
 def get_uniform_random_grid(shape: Tuple[int, int], num_pickup_locs):
     # workspace_path = "\\".join(os.getcwd().split("\\")[:-1])
     abs_path = os.path.dirname(os.path.abspath(__file__))
@@ -97,9 +121,11 @@ def main():
 if __name__ == "__main__":
     # main()
     grid = txt_to_grid("maps/droppoff_grid.txt")
+    print(len(grid), len(grid[0]))
     # 560
     # 22 * 45
-    rand_grid = get_uniform_random_grid((22, 44), 560)
+    urg = UniformRandomGrid()
+    rand_grid = urg.get_uniform_random_grid((22, 44), 560)
     print(rand_grid)
 
     from GlobalObjs.GraphNX import GridGraph, plot_graph

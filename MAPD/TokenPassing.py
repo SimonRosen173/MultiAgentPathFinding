@@ -1,5 +1,5 @@
 # Based off [Ma et al. 2017]
-
+import time
 from typing import Type, Tuple, List, Set, Optional, Dict
 
 from GlobalObjs.GraphNX import GridGraph, plot_graph
@@ -10,6 +10,7 @@ from MAPD.Agent import Agent
 from MAPD.TaskAssigner import TaskAssigner, Task
 
 import numpy as np
+import pandas as pd
 from numpy import random
 # random.seed(42)
 
@@ -161,6 +162,10 @@ class TokenPassing:
         self._non_task_endpoints: List[Tuple[int, int]] = non_task_endpoints
         self._is_logging_collisions = is_logging_collisions
 
+        self.time_elapsed: float = 0.0
+        self.time_elapsed_c_astar: float = 0.0
+        self.coop_astar_calls: int = 0
+
         grid_graph = GridGraph(grid, only_full_G=True)
         grid_graph.remove_non_reachable()
         self._graph = grid_graph.get_full_G()
@@ -173,11 +178,11 @@ class TokenPassing:
         # for start_loc in start_locs:
         #     self._token.update_path()
         #     self._token.resv_locs.add(start_loc)
-        unreachable_locs = set(grid_graph.get_unreachable_nodes())
+        self._unreachable_locs = set(grid_graph.get_unreachable_nodes())
         # if unreachable_locs is None:
         #     pass
 
-        self._ta = TaskAssigner(grid, unreachable_locs, task_frequency)
+        self._ta = TaskAssigner(grid, self._unreachable_locs, task_frequency)
 
     def compute(self):
         token = self._token
@@ -187,6 +192,8 @@ class TokenPassing:
         max_t = self._max_t
 
         curr_t = 0
+
+        start_time_all = time.time()
 
         while curr_t < max_t:
             for agent in agents:
@@ -218,15 +225,21 @@ class TokenPassing:
 
                     ta.remove_task_from_ready(min_task)
 
+                    start_time = time.time()
                     paths, _ = cooperative_astar_path(graph, [agent.curr_loc], [min_task.pickup_point], resv_tbl=resv_tbl,
                                                       resv_locs=resv_locs, start_t=curr_t)
+                    self.time_elapsed_c_astar += time.time() - start_time
+
                     path_to_pickup = paths[0]
                     pickup_t = path_to_pickup[-1][1]
 
+                    start_time = time.time()
                     paths, _ = cooperative_astar_path(graph, [min_task.pickup_point], [min_task.dropoff_point], resv_tbl=resv_tbl,
                                                       resv_locs=resv_locs, start_t=pickup_t)
-                    path_to_dropoff = paths[0]
+                    self.time_elapsed_c_astar += time.time() - start_time
+                    self.coop_astar_calls += 2
 
+                    path_to_dropoff = paths[0]
 
                     agent.assign_task(min_task, path_to_pickup, path_to_dropoff)
 
@@ -271,7 +284,11 @@ class TokenPassing:
                         #     tmp_3 = ((11, 2), 266) in resv_tbl
                         #     agents_ids = token.get_agents_with(((11, 2), 265))
 
+                        start_time = time.time()
                         paths, _ = cooperative_astar_path(graph, [source], [goal], resv_tbl=resv_tbl, resv_locs=resv_locs, start_t=curr_t)
+                        self.time_elapsed_c_astar += time.time() - start_time
+                        self.coop_astar_calls += 1
+
                         path = paths[0]
                         agent.assign_avoidance_path(path)
                         # token.update_path(agent.id, path, False)
@@ -293,7 +310,14 @@ class TokenPassing:
             curr_t += 1
             ta.inc_timestep()
 
+        self.time_elapsed = time.time() - start_time_all
         return agents
+
+    def get_no_tasks_completed(self) -> int:
+        return sum([agent.get_no_tasks_completed() for agent in self._agents])
+
+    def get_no_unreachable_locs(self) -> int:
+        return len(self._unreachable_locs)
 
 
 def visualise_paths(grid, agents: List[Agent]):
@@ -324,16 +348,51 @@ def visualise_paths(grid, agents: List[Agent]):
 
 
 def benchmark_warehouse():
+    no_agents = 5
+    no_timesteps = 250
+    task_frequency = 1
+    no_iters = 50
+
     grid = Warehouse.txt_to_grid("map_warehouse_1.txt", use_curr_workspace=True, simple_layout=False)
     y_len = len(grid)
     x_len = len(grid[0])
 
     non_task_endpoints = [(y, 0) for y in range(y_len)]
-    no_agents = 5
     start_locs = non_task_endpoints[:no_agents]
 
-    tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, 500, task_frequency=1,
-                      is_logging_collisions=False)
+    t_elap_arr = []
+    t_elap_c_astar_arr = []
+    c_astar_calls_arr = []
+    tasks_completed_arr = []
+
+
+    for i in range(no_iters):
+        tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, no_timesteps, task_frequency=task_frequency,
+                          is_logging_collisions=False)
+        print(f"Iteration {i+1}/{no_iters}...")
+        tp.compute()
+        t_elap = tp.time_elapsed
+        t_elap_c_astar = tp.time_elapsed_c_astar
+        c_astar_calls = tp.coop_astar_calls
+        tasks_completed = tp.get_no_tasks_completed()
+        print(f"\tTotal Time Elapsed: {t_elap:.4f}s")
+        print(f"\tCoop AStar Time Elapsed: {t_elap_c_astar:.4f}s ({t_elap_c_astar/t_elap*100:.2f}% of total)")
+        print(f"\tCoop AStar Calls: {c_astar_calls}")
+        print(f"\tNo of Tasks Completed: {tasks_completed}")
+        t_elap_arr.append(t_elap)
+        t_elap_c_astar_arr.append(t_elap_c_astar)
+        c_astar_calls_arr.append(c_astar_calls)
+        tasks_completed_arr.append(tasks_completed)
+
+    df_dict = {
+        "time_elap": t_elap_arr,
+        "time_elap_c_astar": t_elap_c_astar_arr,
+        "c_astar_calls": c_astar_calls_arr,
+        "tasks_completed": tasks_completed_arr
+    }
+    df = pd.DataFrame.from_dict(df_dict)
+
+    df.to_csv(f"benchmarks/na_{no_agents}_nt_{no_timesteps}_tf_{task_frequency}.csv")
 
 
 def main():
@@ -358,9 +417,12 @@ def main():
     # new_vis.animate_path(full_paths_dict[0], is_pos_xy=False)
     # new_vis.window.getMouse()
 
-    no_tasks_completed = sum([agent.get_no_tasks_completed() for agent in final_agents])
+    # no_tasks_completed = sum([agent.get_no_tasks_completed() for agent in final_agents])
 
-    print(f"\nNumber of tasks completed: {no_tasks_completed}\n")
+    print(f"\nNumber of tasks completed: {tp.get_no_tasks_completed()}\n")
+    print(f"Time Elapsed: {tp.time_elapsed:.4f}")
+    print(f"Coop AStar Elapsed: {tp.time_elapsed_c_astar:.4f} ({tp.time_elapsed_c_astar/tp.time_elapsed * 100:.2f}% of total)")
+    print(f"Coop AStar Calls: {tp.coop_astar_calls}")
 
     for agent in final_agents:
         print(f"############")
@@ -382,4 +444,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+    benchmark_warehouse()

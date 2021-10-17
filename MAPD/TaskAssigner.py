@@ -24,7 +24,7 @@ class TaskAssigner:
     DROPOFF = 2
     OBSTACLE = 3
 
-    def __init__(self, grid, unreachable_locs, task_frequency):
+    def __init__(self, grid: List[List[int]], unreachable_locs: Set, task_frequency: int):
         self._grid = grid
         self._unreachable_locs = unreachable_locs
         self._task_frequency = task_frequency
@@ -113,3 +113,8 @@ class TaskAssigner:
         self._curr_t += 1
         if self._curr_t % self._task_frequency == 0:
             self._create_task()
+
+    def inc_timestep_by_n(self, n):
+        for i in range(n):
+            self.inc_timestep()
+
