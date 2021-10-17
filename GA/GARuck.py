@@ -126,22 +126,27 @@ def mutate(arr: np.ndarray) -> np.ndarray:
 
 
 def evaluate(values: np.ndarray):
-    # noinspection PyTypeChecker
-    grid: List = values.tolist()  # This is a list, why PyCharm...
-    # print("Evaluating... ")
-    y_len = len(grid)
-    x_len = len(grid[0])
-    no_agents = 5
-    max_t = 250
+    try:
+        # noinspection PyTypeChecker
+        grid: List = values.tolist()  # This is a list, why PyCharm...
+        # print("Evaluating... ")
+        y_len = len(grid)
+        x_len = len(grid[0])
+        no_agents = 5
+        max_t = 250
 
-    non_task_endpoints = [(y, 0) for y in range(y_len)]
-    start_locs = non_task_endpoints[:no_agents]
+        non_task_endpoints = [(y, 0) for y in range(y_len)]
+        start_locs = non_task_endpoints[:no_agents]
 
-    tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, max_t, task_frequency=1,
-                      is_logging_collisions=True)
-    final_agents = tp.compute()
-    tasks_completed = tp.get_no_tasks_completed()
-    no_unreachable_locs = tp.get_no_unreachable_locs()
+        tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, max_t, task_frequency=1,
+                          is_logging_collisions=True)
+        final_agents = tp.compute()
+        tasks_completed = tp.get_no_tasks_completed()
+        no_unreachable_locs = tp.get_no_unreachable_locs()
+    except Exception as e:  # Bad way to do this but I do not want this to crash after 5hrs of training from a random edge case
+        print(f"Exception occurred: {e}")
+        tasks_completed = 0
+        no_unreachable_locs = 100000
 
     # Maximising tasks_completed and minimising no_unreachable_locs
     return tasks_completed, -1 * no_unreachable_locs
@@ -198,23 +203,23 @@ def main():
     ray.init()
 
     # create and train the population
-    pop_size = 10
-    n_generations = 2
+    pop_size = 100
+    n_generations = 100
     module = WarehouseGAModule(population_size=pop_size)
-    trainer = Trainer(generations=n_generations, progress=True, is_saving=True, file_suffix="populations/pop", save_interval=1)
+    trainer = Trainer(generations=n_generations, progress=True, is_saving=True, file_suffix="populations/pop", save_interval=10)
     pop, logbook, halloffame = trainer.fit(module)
     # pop_vals = [member.value for member in pop]
 
     with open("populations/pop_final.pkl", "wb") as f:
         pickle.dump(pop, f)
 
-    # Not the best way to choose 'best' individuals but should give a reasonable idea of how well GA is performing
-    sorted_members = sorted(pop, key=lambda x: x.fitness[0] + x.fitness[1])
-    for i in range(5):
-        curr_grid = ray.get(sorted_members[i].value)
-        vis = VisGrid(curr_grid, (800, 400), 25, tick_time=0.2)
-        vis.save_to_png(f"best/best_grid_{i}")
-        vis.window.close()
+    # # Not the best way to choose 'best' individuals but should give a reasonable idea of how well GA is performing
+    # sorted_members = sorted(pop, key=lambda x: x.fitness[0] + x.fitness[1])
+    # for i in range(5):
+    #     curr_grid = ray.get(sorted_members[i].value)
+    #     vis = VisGrid(curr_grid, (800, 400), 25, tick_time=0.2)
+    #     vis.save_to_png(f"best/best_grid_{i}")
+    #     vis.window.close()
 
     print('initial stats:', logbook[0])
     print('final stats:', logbook[-1])
@@ -279,7 +284,8 @@ def alt():
         vis_1.save_to_png("grid_save")
         vis_1.window.close()
 
+
 if __name__ == "__main__":
-    # main()
-    alt()
+    main()
+    # alt()
     # test()
