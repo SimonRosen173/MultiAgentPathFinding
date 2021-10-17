@@ -203,10 +203,10 @@ def main():
     ray.init()
 
     # create and train the population
-    pop_size = 10  # 0
-    n_generations = 2  # 0
+    pop_size = 160  # 0
+    n_generations = 1000  # 0
     module = WarehouseGAModule(population_size=pop_size)
-    trainer = Trainer(generations=n_generations, progress=True, is_saving=False, file_suffix="populations/pop", save_interval=10)
+    trainer = Trainer(generations=n_generations, progress=True, is_saving=True, file_suffix="populations/pop", save_interval=10)
     pop, logbook, halloffame = trainer.fit(module)
     # pop_vals = [member.value for member in pop]
 
