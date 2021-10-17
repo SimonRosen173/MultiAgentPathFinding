@@ -203,15 +203,19 @@ def main():
     ray.init()
 
     # create and train the population
-    pop_size = 100
-    n_generations = 100
+    pop_size = 10  # 0
+    n_generations = 2  # 0
     module = WarehouseGAModule(population_size=pop_size)
-    trainer = Trainer(generations=n_generations, progress=True, is_saving=True, file_suffix="populations/pop", save_interval=10)
+    trainer = Trainer(generations=n_generations, progress=True, is_saving=False, file_suffix="populations/pop", save_interval=10)
     pop, logbook, halloffame = trainer.fit(module)
     # pop_vals = [member.value for member in pop]
 
+    with open("stats/hist.pkl", "wb") as f:
+        pickle.dump(logbook.history, f)
+
     with open("populations/pop_final.pkl", "wb") as f:
-        pickle.dump(pop, f)
+        vals = [ray.get(member.value) for member in pop]
+        pickle.dump(vals, f)
 
     # # Not the best way to choose 'best' individuals but should give a reasonable idea of how well GA is performing
     # sorted_members = sorted(pop, key=lambda x: x.fitness[0] + x.fitness[1])
@@ -274,11 +278,24 @@ def test():
     pass
 
 
+def graph():
+    pop = None
+    with open("populations/pop_90.pkl", "rb") as f:
+        pop = pickle.load(f)
+
+    if pop is not None:
+        for i, member in enumerate(pop):
+            if i % 10 == 0:
+                vis_1 = VisGrid(member, (800, 400), 25, tick_time=0.2)
+                vis_1.save_to_png(f"final_grids/grid_{i}")
+                vis_1.window.close()
+
+
 def alt():
     pop = None
     with open("populations/pop_1.pkl", "rb") as f:
         pop = pickle.load(f)
-        
+
     if pop is not None:
         vis_1 = VisGrid(pop[0], (800, 400), 25, tick_time=0.2)
         vis_1.save_to_png("grid_save")
@@ -286,6 +303,7 @@ def alt():
 
 
 if __name__ == "__main__":
+    # graph()
     main()
     # alt()
     # test()
