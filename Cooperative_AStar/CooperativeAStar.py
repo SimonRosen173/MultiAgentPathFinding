@@ -436,6 +436,23 @@ def main():
     pass
 
 
+def test_cython():
+    import CooperativeAStarFast
+    grid = Warehouse.txt_to_grid("map_warehouse.txt", use_curr_workspace=True, simple_layout=False)
+    grid = np.array(grid)
+    # np_arr = np.ones((10, 10), dtype=int)
+    # print(grid.shape)
+    source = (0, 0)
+    target = (10, 10)
+    resv_tbl = {((1, 1), 1)}
+    resv_locs = {(2, 2)}
+    path = CooperativeAStarFast.cooperative_asar_path(grid, source[0], source[1],
+                                               target[0], target[1], resv_tbl, resv_locs, 0)
+    print(path)
+    # pass
+
+
 if __name__ == "__main__":
     # main()
-    test_njit()
+    # test_njit()
+    test_cython()
