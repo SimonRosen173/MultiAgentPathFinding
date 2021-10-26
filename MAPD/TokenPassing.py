@@ -4,17 +4,26 @@ from typing import Type, Tuple, List, Set, Optional, Dict
 
 from GlobalObjs.GraphNX import GridGraph, plot_graph
 from Benchmark import Warehouse
-from Cooperative_AStar.CooperativeAStar import cooperative_astar_path, man_dist
+# from Cooperative_AStar.CooperativeAStar import cooperative_astar_path, man_dist
 from Visualisations.Vis import VisGrid
 from MAPD.Agent import Agent
 from MAPD.TaskAssigner import TaskAssigner, Task
+from Cooperative_AStar.CooperativeAStar import cooperative_astar_path_fast
+
 
 import numpy as np
 import pandas as pd
 from numpy import random
+from numba import njit
+
 # random.seed(42)
 
 Path = List[Tuple[Tuple[int, int], int]]
+
+
+@njit
+def man_dist(node1, node2):
+    return abs(node1[0] - node2[0]) + abs(node1[1] - node2[1])
 
 
 # NOTE: Token must contain full paths of agents not just current
@@ -22,6 +31,8 @@ class Token:
     def __init__(self, no_agents, start_locs: List[Tuple[int, int]], non_task_endpoints: List[Tuple[int, int]],
                  start_t=0):
         self._resv_rbl = set()
+        self._resv_locs = set()
+
         self._no_agents = no_agents
         self._non_task_endpoints = non_task_endpoints
 
@@ -33,6 +44,7 @@ class Token:
         # Pos and time interval agents are stationary
         self._stationary_list: List[List[Tuple[Tuple, int, int]]] = [[] for _ in range(no_agents)]
         self._is_stationary_list: List[bool] = [False]*no_agents
+        self._curr_stationary: List[Optional[Tuple[int, int]]] = [None for _ in range(no_agents)]
 
         for agent_ind in range(no_agents):
             self._paths[agent_ind] = [(start_locs[agent_ind], start_t)]
@@ -47,7 +59,7 @@ class Token:
         if not self._is_stationary_list[agent_id]:
             # add_stationary sets agent specified as stationary
             self._is_stationary_list[agent_id] = True
-
+            self._curr_stationary[agent_id] = pos
             self._stationary_list[agent_id].append((pos, start_t, np.inf))
 
     # pos only required for error checking
@@ -110,16 +122,30 @@ class Token:
         resv_tbl: Set[Tuple[Tuple[int, int], int]] = set()
         # resv_tbl = self._resv_rbl
         for curr_agent_id in range(self._no_agents):
-            if curr_agent_id != agent_id and not self._is_stationary_list[curr_agent_id]:
+            if curr_agent_id != agent_id:  # and not self._is_stationary_list[curr_agent_id]
                 for el in self._paths[curr_agent_id]:
                     if el[1] >= curr_t:  # NEW
                         resv_tbl.add(el)
                         # Reserve at next time step to avoid head-on/pass-through collisions
                         resv_tbl.add((el[0], el[1]+1))
-
+                # Add space time points where relevant agent was stationary
+                for stationary_loc in self._stationary_list[curr_agent_id]:
+                    if stationary_loc[2] >= curr_t and stationary_loc[2] != np.inf:
+                        loc = stationary_loc[0]
+                        space_time_locs = [(loc, t) for t in range(stationary_loc[2], stationary_loc[3]+2)]
+                        resv_tbl.update(space_time_locs)
         return resv_tbl
 
-    def get_resv_locs(self, agent_id: int, curr_t: int) -> Dict[Tuple[int, int], List[Tuple[int, int]]]:
+    def get_resv_locs(self, agent_id: int, curr_t: int) -> Set[Tuple[int, int]]:
+        resv_locs: Set[Tuple[int, int]] = set()
+        for curr_agent_id in range(self._no_agents):
+            if curr_agent_id != agent_id:
+                if self._is_stationary_list[curr_agent_id]:
+                    resv_locs.add(self._curr_stationary[curr_agent_id])
+                resv_locs.add(self._non_task_endpoints[curr_agent_id])
+        return resv_locs
+
+    def get_resv_locs_old(self, agent_id: int, curr_t: int) -> Dict[Tuple[int, int], List[Tuple[int, int]]]:
         resv_locs: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
         for curr_agent_id in range(self._no_agents):
             if curr_agent_id != agent_id:
@@ -158,6 +184,7 @@ class TokenPassing:
                  task_frequency=1, start_t=0, is_logging_collisions=False):
         self._no_agents = no_agents
         self._grid = grid
+        self._np_grid = np.array(grid, dtype=int)
         self._max_t = max_t
         self._non_task_endpoints: List[Tuple[int, int]] = non_task_endpoints
         self._is_logging_collisions = is_logging_collisions
@@ -178,7 +205,10 @@ class TokenPassing:
         # for start_loc in start_locs:
         #     self._token.update_path()
         #     self._token.resv_locs.add(start_loc)
-        self._unreachable_locs = set(grid_graph.get_unreachable_nodes())
+
+        yx_unreachable_locs = grid_graph.get_unreachable_nodes()
+        xy_unreachable_locs = [(x, y) for (y, x) in yx_unreachable_locs]
+        self._unreachable_locs = set(xy_unreachable_locs)
         # if unreachable_locs is None:
         #     pass
 
@@ -190,6 +220,7 @@ class TokenPassing:
         graph = self._graph
         ta = self._ta
         max_t = self._max_t
+        np_grid = self._np_grid
 
         curr_t = 0
 
@@ -226,20 +257,29 @@ class TokenPassing:
                     ta.remove_task_from_ready(min_task)
 
                     start_time = time.time()
-                    paths, _ = cooperative_astar_path(graph, [agent.curr_loc], [min_task.pickup_point], resv_tbl=resv_tbl,
-                                                      resv_locs=resv_locs, start_t=curr_t)
+
+                    # noinspection PyTypeChecker
+                    path = cooperative_astar_path_fast(np_grid, source=agent.curr_loc, target=min_task.pickup_point,
+                                                          resv_tbl=resv_tbl, resv_locs=resv_locs, start_t=curr_t)
+                    # paths, _ = cooperative_astar_path(graph, [agent.curr_loc], [min_task.pickup_point], resv_tbl=resv_tbl,
+                    #                                   resv_locs=resv_locs, start_t=curr_t)
                     self.time_elapsed_c_astar += time.time() - start_time
 
-                    path_to_pickup = paths[0]
+                    path_to_pickup = path
+                    # path_to_pickup = paths[0]
                     pickup_t = path_to_pickup[-1][1]
 
                     start_time = time.time()
-                    paths, _ = cooperative_astar_path(graph, [min_task.pickup_point], [min_task.dropoff_point], resv_tbl=resv_tbl,
-                                                      resv_locs=resv_locs, start_t=pickup_t)
+                    # noinspection PyTypeChecker
+                    path = cooperative_astar_path_fast(np_grid, source=min_task.pickup_point, target=min_task.dropoff_point,
+                                                  resv_tbl=resv_tbl, resv_locs=resv_locs, start_t=pickup_t)
+                    # paths, _ = cooperative_astar_path(graph, [min_task.pickup_point], [min_task.dropoff_point], resv_tbl=resv_tbl,
+                    #                                   resv_locs=resv_locs, start_t=pickup_t)
                     self.time_elapsed_c_astar += time.time() - start_time
                     self.coop_astar_calls += 2
 
-                    path_to_dropoff = paths[0]
+                    path_to_dropoff = path
+                    # path_to_dropoff = paths[0]
 
                     agent.assign_task(min_task, path_to_pickup, path_to_dropoff)
 
@@ -285,11 +325,16 @@ class TokenPassing:
                         #     agents_ids = token.get_agents_with(((11, 2), 265))
 
                         start_time = time.time()
-                        paths, _ = cooperative_astar_path(graph, [source], [goal], resv_tbl=resv_tbl, resv_locs=resv_locs, start_t=curr_t)
+
+                        # noinspection PyTypeChecker
+                        path = cooperative_astar_path_fast(np_grid, source=source, target=goal,
+                                                      resv_tbl=resv_tbl, resv_locs=resv_locs, start_t=curr_t)
+
+                        # paths, _ = cooperative_astar_path(graph, [source], [goal], resv_tbl=resv_tbl, resv_locs=resv_locs, start_t=curr_t)
                         self.time_elapsed_c_astar += time.time() - start_time
                         self.coop_astar_calls += 1
 
-                        path = paths[0]
+                        # path = paths[0]
                         agent.assign_avoidance_path(path)
                         # token.update_path(agent.id, path, False)
                         token.add_to_path(agent.id, path)
@@ -347,6 +392,230 @@ def visualise_paths(grid, agents: List[Agent]):
     new_vis.window.getMouse()
 
 
+def benchmark_tp_no_agents():
+    no_agents_arr = [1, 2, 5, 10, 15, 20]
+    n = len(no_agents_arr)
+    max_t = 500
+    no_runs = 20
+
+    # print("##############")
+    # print("REAL WAREHOUSE")
+    # print("##############")
+    #
+    # # Real Warehouse Layout
+    # grid = Warehouse.txt_to_grid("map_warehouse_1.txt", use_curr_workspace=True, simple_layout=False)
+    # y_len = len(grid)
+    # non_task_endpoints = [(0, y) for y in range(y_len)]
+    #
+    # # Time Taken Vs No of Agents
+    #
+    # times_taken_avg = [0.0] * n
+    # tasks_completed_avg = [0.0] * n
+    # times_taken_var = [0.0] * n
+    # tasks_completed_var = [0.0] * n
+    #
+    # for i, no_agents in enumerate(no_agents_arr):
+    #     print(f"\nno_agents = {no_agents}")
+    #     start_locs = non_task_endpoints[:no_agents]
+    #     curr_tasks_completed = []
+    #     curr_times_taken = []
+    #
+    #     for run_no in range(no_runs):
+    #         print(f"\trun_no={run_no} - ", end="")
+    #         start = time.time()
+    #         tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, max_t, task_frequency=1,
+    #                           is_logging_collisions=False)
+    #         final_agents = tp.compute()
+    #         time_elapsed = time.time() - start
+    #         curr_tasks_completed.append(tp.get_no_tasks_completed())
+    #         curr_times_taken.append(time_elapsed)
+    #         print(f"time_elapsed: {time_elapsed:.4f}")
+    #
+    #         # times_taken_avg[i] += time_elapsed
+    #
+    #     times_taken_avg[i] = np.mean(curr_times_taken)
+    #     tasks_completed_avg[i] = np.mean(curr_tasks_completed)
+    #     times_taken_var[i] = np.var(curr_times_taken)
+    #     tasks_completed_var[i] = np.var(curr_tasks_completed)
+    #     print(f"\ttotal time_elapsed {sum(curr_times_taken): .4f}")
+    # df_dict = {
+    #     "no_agents": no_agents_arr,
+    #     "time_taken_avg": times_taken_avg,
+    #     "time_taken_var": times_taken_var,
+    #     "tasks_completed_avg": tasks_completed_avg,
+    #     "tasks_completed_var": tasks_completed_var
+    # }
+    # df = pd.DataFrame.from_dict(df_dict)
+    # df.to_csv("benchmarks/no_agents_vs_t_tc_real.csv", index=False)
+
+    print("##############")
+    print("RAND WAREHOUSE")
+    print("##############")
+    num_storage_locs = 560  # 560
+    storage_shape = (22, 44)
+
+    # Time Taken Vs No of Agents
+
+    times_taken_avg = [0.0] * n
+    tasks_completed_avg = [0.0] * n
+    times_taken_var = [0.0] * n
+    tasks_completed_var = [0.0] * n
+
+    for i, no_agents in enumerate(no_agents_arr):
+        print(f"\nno_agents = {no_agents}")
+        curr_tasks_completed = []
+        curr_times_taken = []
+
+        for run_no in range(no_runs):
+            print(f"\trun_no={run_no} - generating grid... ", end="")
+            grid = Warehouse.get_uniform_random_grid(storage_shape, num_storage_locs)
+            y_len = len(grid)
+            non_task_endpoints = [(0, y) for y in range(y_len)]
+            start_locs = non_task_endpoints[:no_agents]
+
+            print(f"doing MAPD... ", end="")
+            start = time.time()
+            tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, max_t, task_frequency=1,
+                              is_logging_collisions=False)
+            final_agents = tp.compute()
+            time_elapsed = time.time() - start
+            curr_tasks_completed.append(tp.get_no_tasks_completed())
+            curr_times_taken.append(time_elapsed)
+            print(f"time_elapsed: {time_elapsed:.4f}")
+
+            # times_taken_avg[i] += time_elapsed
+
+        times_taken_avg[i] = np.mean(curr_times_taken)
+        tasks_completed_avg[i] = np.mean(curr_tasks_completed)
+        times_taken_var[i] = np.var(curr_times_taken)
+        tasks_completed_var[i] = np.var(curr_tasks_completed)
+        print(f"\ttotal time_elapsed {sum(curr_times_taken): .4f}")
+    df_dict = {
+        "no_agents": no_agents_arr,
+        "time_taken_avg": times_taken_avg,
+        "time_taken_var": times_taken_var,
+        "tasks_completed_avg": tasks_completed_avg,
+        "tasks_completed_var": tasks_completed_var
+    }
+    df = pd.DataFrame.from_dict(df_dict)
+    df.to_csv("benchmarks/no_agents_vs_t_tc_rand.csv", index=False)
+
+
+def benchmark_tp_no_timesteps():
+    no_agents = 5
+    # max_t = 500
+    no_timesteps_arr = [100, 200, 300, 400, 500]
+    n = len(no_timesteps_arr)
+    no_runs = 20
+
+    print("##############")
+    print("REAL WAREHOUSE")
+    print("##############")
+
+    # Real Warehouse Layout
+    grid = Warehouse.txt_to_grid("map_warehouse_1.txt", use_curr_workspace=True, simple_layout=False)
+    y_len = len(grid)
+    non_task_endpoints = [(0, y) for y in range(y_len)]
+
+    # Time Taken Vs No of Agents
+
+    times_taken_avg = [0.0] * n
+    tasks_completed_avg = [0.0] * n
+    times_taken_var = [0.0] * n
+    tasks_completed_var = [0.0] * n
+
+    for i, no_timesteps in enumerate(no_timesteps_arr):
+        print(f"\nno_timesteps = {no_timesteps}")
+        start_locs = non_task_endpoints[:no_agents]
+        curr_tasks_completed = []
+        curr_times_taken = []
+
+        for run_no in range(no_runs):
+            print(f"\trun_no={run_no} - ", end="")
+            start = time.time()
+            tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, no_timesteps, task_frequency=1,
+                              is_logging_collisions=False)
+            final_agents = tp.compute()
+            time_elapsed = time.time() - start
+            curr_tasks_completed.append(tp.get_no_tasks_completed())
+            curr_times_taken.append(time_elapsed)
+            print(f"time_elapsed: {time_elapsed:.4f}")
+
+            # times_taken_avg[i] += time_elapsed
+
+        times_taken_avg[i] = np.mean(curr_times_taken)
+        tasks_completed_avg[i] = np.mean(curr_tasks_completed)
+        times_taken_var[i] = np.var(curr_times_taken)
+        tasks_completed_var[i] = np.var(curr_tasks_completed)
+        print(f"\ttotal time_elapsed {sum(curr_times_taken): .4f}")
+    df_dict = {
+        "no_timesteps": no_timesteps_arr,
+        "time_taken_avg": times_taken_avg,
+        "time_taken_var": times_taken_var,
+        "tasks_completed_avg": tasks_completed_avg,
+        "tasks_completed_var": tasks_completed_var
+    }
+    df = pd.DataFrame.from_dict(df_dict)
+    df.to_csv("benchmarks/no_timesteps_vs_t_tc_real.csv", index=False)
+
+    print("##############")
+    print("RAND WAREHOUSE")
+    print("##############")
+    num_storage_locs = 560  # 560
+    storage_shape = (22, 44)
+
+    # Time Taken Vs No of Agents
+
+    times_taken_avg = [0.0] * n
+    tasks_completed_avg = [0.0] * n
+    times_taken_var = [0.0] * n
+    tasks_completed_var = [0.0] * n
+
+    for i, no_timesteps in enumerate(no_timesteps_arr):
+        print(f"\nno_timesteps = {no_timesteps}")
+        curr_tasks_completed = []
+        curr_times_taken = []
+
+        for run_no in range(no_runs):
+            print(f"\trun_no={run_no} - generating grid... ", end="")
+            grid = Warehouse.get_uniform_random_grid(storage_shape, num_storage_locs)
+            y_len = len(grid)
+            non_task_endpoints = [(0, y) for y in range(y_len)]
+            start_locs = non_task_endpoints[:no_agents]
+
+            print(f"doing MAPD... ", end="")
+            start = time.time()
+            tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, no_timesteps, task_frequency=1,
+                              is_logging_collisions=False)
+            final_agents = tp.compute()
+            time_elapsed = time.time() - start
+            curr_tasks_completed.append(tp.get_no_tasks_completed())
+            curr_times_taken.append(time_elapsed)
+            print(f"time_elapsed: {time_elapsed:.4f}")
+
+            # times_taken_avg[i] += time_elapsed
+
+        times_taken_avg[i] = np.mean(curr_times_taken)
+        tasks_completed_avg[i] = np.mean(curr_tasks_completed)
+        times_taken_var[i] = np.var(curr_times_taken)
+        tasks_completed_var[i] = np.var(curr_tasks_completed)
+        print(f"\ttotal time_elapsed {sum(curr_times_taken): .4f}")
+    df_dict = {
+        "no_timesteps": no_timesteps_arr,
+        "time_taken_avg": times_taken_avg,
+        "time_taken_var": times_taken_var,
+        "tasks_completed_avg": tasks_completed_avg,
+        "tasks_completed_var": tasks_completed_var
+    }
+    df = pd.DataFrame.from_dict(df_dict)
+    df.to_csv("benchmarks/no_timesteps_vs_t_tc_rand.csv", index=False)
+
+
+def benchmark_tp():
+    # benchmark_tp_no_agents()
+    benchmark_tp_no_timesteps()
+
+
 def benchmark_warehouse():
     no_agents = 5
     no_timesteps = 250
@@ -364,7 +633,6 @@ def benchmark_warehouse():
     t_elap_c_astar_arr = []
     c_astar_calls_arr = []
     tasks_completed_arr = []
-
 
     for i in range(no_iters):
         tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, no_timesteps, task_frequency=task_frequency,
@@ -403,10 +671,10 @@ def main():
     y_len = len(grid)
     x_len = len(grid[0])
 
-    no_agents = 20
-    max_t = 250
+    no_agents = 5
+    max_t = 500
 
-    non_task_endpoints = [(y, 0) for y in range(y_len)]
+    non_task_endpoints = [(0, y) for y in range(y_len)]
     start_locs = non_task_endpoints[:no_agents]
 
     tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, max_t, task_frequency=1,
@@ -437,12 +705,13 @@ def main():
     # visualise_paths(grid, final_agents)
     # plot_graph(tp._graph, "tp_G.png")
 
-    vis = VisGrid(grid, (800, 400), 25, tick_time=0.2)
-    vis.window.getMouse()
-    vis.animate_mapd(final_agents, is_pos_xy=False)
-    vis.window.getMouse()
+    # vis = VisGrid(grid, (800, 400), 25, tick_time=0.2)
+    # vis.window.getMouse()
+    # vis.animate_mapd(final_agents, is_pos_xy=True)
+    # vis.window.getMouse()
 
 
 if __name__ == "__main__":
     # main()
-    benchmark_warehouse()
+    benchmark_tp()
+    # benchmark_warehouse()

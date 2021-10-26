@@ -34,9 +34,9 @@ cdef is_neighbour_valid(np.ndarray[DTYPE_t, ndim=2] grid, int x, int y):
     # return  is_valid
 
 
-def cooperative_asar_path(np.ndarray[DTYPE_t, ndim=2] grid,
-                          int source_x, int source_y,
-                          int target_x, int target_y,
+def cooperative_astar_path(np.ndarray[DTYPE_t, ndim=2] grid,
+                          tuple source, tuple target,
+                          # int target_x, int target_y,
                           set resv_tbl, set resv_locs,
                           int start_t, int cutoff_t = 500
                           ):
@@ -48,7 +48,7 @@ def cooperative_asar_path(np.ndarray[DTYPE_t, ndim=2] grid,
 
     c = count()
 
-    cdef list q = [(0, next(c), ((source_x, source_y), start_t), 0, None)]  # _, __, curnode, t, dist, parent
+    q = [(0, next(c), (source, start_t), 0, None)]  # _, __, curnode, t, dist, parent
 
     # Maps enqueued nodes to distance of discovered paths and the
     # computed heuristics to target. We avoid computing the heuristics
@@ -59,8 +59,8 @@ def cooperative_asar_path(np.ndarray[DTYPE_t, ndim=2] grid,
     cdef bint path_found = False
 
     # tmp = (source, start_t) in resv_tbl
-    cdef list target = [target_x, target_y]
-    cdef list source = [source_x, source_y]
+    # cdef list target = [target_x, target_y]
+    # cdef list source = [source_x, source_y]
     cdef int x = 0
     cdef int y = 0
     cdef int t = 0
@@ -71,12 +71,14 @@ def cooperative_asar_path(np.ndarray[DTYPE_t, ndim=2] grid,
     cdef int curr_x = 0
     cdef int curr_y = 0
 
-    assert 0 <= source_x <= max_x and 0<= source_y <= max_y, "Source not valid"
-    assert 0 <= target_x <= max_x and 0<= target_y <= max_y, "Target not valid"
+    assert 0 <= source[0] <= max_x and 0<= source[1] <= max_y, f"Source {source} not valid"
+    assert 0 <= target[0] <= max_x and 0<= target[1] <= max_y, f"Target {target} not valid"
 
     while q and not path_found:
         # Pop the smallest item from queue.
-        _, __, curnode, dist, parent = heappop(q)
+        tmp, __, curnode, dist, parent = heappop(q)
+
+        # print(tmp, curnode)
 
         # print(curnode, target)
         # If target found
@@ -132,6 +134,7 @@ def cooperative_asar_path(np.ndarray[DTYPE_t, ndim=2] grid,
 
             if grid[curr_y, curr_x] != 0 and not (neighbour[0] == target[0] and neighbour[1] == target[1]) \
                     and not (neighbour[0] == source[0] and neighbour[1] == source[1]):
+                # print("Obstacle at ", curr_x, curr_y)
                 continue
 
             # curr_t = curnode[1] + curr_weight

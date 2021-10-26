@@ -134,9 +134,9 @@ def evaluate(values: np.ndarray):
         y_len = len(grid)
         x_len = len(grid[0])
         no_agents = 5
-        max_t = 250
+        max_t = 500
 
-        non_task_endpoints = [(y, 0) for y in range(y_len)]
+        non_task_endpoints = [(0, y) for y in range(y_len)]
         start_locs = non_task_endpoints[:no_agents]
 
         tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, max_t, task_frequency=1,
@@ -204,8 +204,8 @@ def main():
     ray.init()
 
     # create and train the population
-    pop_size = 160  # 0
-    n_generations = 1000  # 0
+    pop_size = 50  # 0
+    n_generations = 100  # 0
     module = WarehouseGAModule(population_size=pop_size)
     trainer = Trainer(generations=n_generations, progress=True, is_saving=True, file_suffix="populations/pop", save_interval=10)
     pop, logbook, halloffame = trainer.fit(module)
@@ -357,8 +357,8 @@ def alt():
 
 if __name__ == "__main__":
     # graph_fitnesses()
-    animate_grid()
+    # animate_grid()
     # draw_grids()
-    # main()
+    main()
     # alt()
     # test()
