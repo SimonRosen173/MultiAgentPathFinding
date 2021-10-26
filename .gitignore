@@ -1,3 +1,7 @@
 .idea/
 */__pycache__
 **/.ipynb_checkpoints
+GA/populations
+GA/stats
+GA/final_grids
+GA/best

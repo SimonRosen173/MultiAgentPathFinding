@@ -17,6 +17,8 @@ from Visualisations.Vis import VisGrid
 opt_grid_start_x = 6
 NO_STORAGE_LOCS = 560
 OPT_GRID_SHAPE = (22, 44)
+NO_AGENTS = 20
+MAX_T = 500
 
 
 @njit
@@ -132,8 +134,8 @@ def evaluate(values: np.ndarray):
         # print("Evaluating... ")
         y_len = len(grid)
         x_len = len(grid[0])
-        no_agents = 5
-        max_t = 250
+        no_agents = NO_AGENTS
+        max_t = MAX_T
 
         non_task_endpoints = [(y, 0) for y in range(y_len)]
         start_locs = non_task_endpoints[:no_agents]
@@ -303,7 +305,7 @@ def alt():
 
 
 if __name__ == "__main__":
-    graph()
-    # main()
+    # graph()
+    main()
     # alt()
     # test()
