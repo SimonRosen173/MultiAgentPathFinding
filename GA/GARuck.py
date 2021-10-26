@@ -4,6 +4,7 @@ from typing import List, Tuple, Optional, Set, Dict
 
 from numba import njit, jit
 import numpy as np
+import pandas as pd
 
 import ruck
 from ruck.external.deap import select_nsga2
@@ -17,8 +18,6 @@ from Visualisations.Vis import VisGrid
 opt_grid_start_x = 6
 NO_STORAGE_LOCS = 560
 OPT_GRID_SHAPE = (22, 44)
-NO_AGENTS = 20
-MAX_T = 500
 
 
 @njit
@@ -134,10 +133,10 @@ def evaluate(values: np.ndarray):
         # print("Evaluating... ")
         y_len = len(grid)
         x_len = len(grid[0])
-        no_agents = NO_AGENTS
-        max_t = MAX_T
+        no_agents = 5
+        max_t = 500
 
-        non_task_endpoints = [(y, 0) for y in range(y_len)]
+        non_task_endpoints = [(0, y) for y in range(y_len)]
         start_locs = non_task_endpoints[:no_agents]
 
         tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, max_t, task_frequency=1,
@@ -205,8 +204,8 @@ def main():
     ray.init()
 
     # create and train the population
-    pop_size = 160  # 0
-    n_generations = 1000  # 0
+    pop_size = 50  # 0
+    n_generations = 100  # 0
     module = WarehouseGAModule(population_size=pop_size)
     trainer = Trainer(generations=n_generations, progress=True, is_saving=True, file_suffix="populations/pop", save_interval=10)
     pop, logbook, halloffame = trainer.fit(module)
@@ -280,32 +279,86 @@ def test():
     pass
 
 
-def graph():
+def graph_fitnesses():
+    for pop_name in ["final", "0", "500"]:
+        pop = None
+        with open(f"populations/pop_{pop_name}.pkl", "rb") as f:
+            pop = pickle.load(f)
+
+        tasks_completed_arr = []
+        no_unreachable_locs_arr = []
+        print(f"Re-evaluating fitnesses for {pop_name}...")
+
+        if pop is not None:
+            for i, member in enumerate(pop):
+                print(f"Re-evaluating {i+1}/{len(pop)}...")
+                tasks_completed, no_unreachable_locs = evaluate(member)
+                no_unreachable_locs *= -1
+                tasks_completed_arr.append(tasks_completed)
+                no_unreachable_locs_arr.append(no_unreachable_locs)
+                # if i % 10 == 0:
+                #     vis_1 = VisGrid(member, (800, 400), 25, tick_time=0.2)
+                #     vis_1.save_to_png(f"final_grids/grid_{i}")
+                #     vis_1.window.close()
+
+        df_dict = {"tasks_completed":tasks_completed_arr, "no_unreachable_locs":no_unreachable_locs_arr}
+        df = pd.DataFrame.from_dict(df_dict)
+        df.to_csv(f"csvs/{pop_name}.csv")
+
+
+def draw_grids():
     pop = None
     with open("populations/pop_final.pkl", "rb") as f:
         pop = pickle.load(f)
 
     if pop is not None:
-        for i, member in enumerate(pop):
-            if i % 10 == 0:
-                vis_1 = VisGrid(member, (800, 400), 25, tick_time=0.2)
-                vis_1.save_to_png(f"final_grids/grid_{i}")
-                vis_1.window.close()
+        vis_1 = VisGrid(pop[103], (800, 400), 25, tick_time=0.2)
+        vis_1.save_to_png(f"best/final_103")
+        vis_1.window.close()
+
+
+def animate_grid():
+    pop = None
+    with open("populations/pop_final.pkl", "rb") as f:
+        pop = pickle.load(f)
+
+    good_member = pop[26]
+    bad_member = pop[103]
+    grid = good_member
+
+    y_len = len(grid)
+    x_len = len(grid[0])
+
+    no_agents = 5
+    max_t = 250
+
+    non_task_endpoints = [(y, 0) for y in range(y_len)]
+    start_locs = non_task_endpoints[:no_agents]
+
+    tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, max_t, task_frequency=1,
+                      is_logging_collisions=True)
+    final_agents = tp.compute()
+
+    vis = VisGrid(grid, (800, 400), 25, tick_time=0.2)
+    vis.window.getMouse()
+    vis.animate_mapd(final_agents, is_pos_xy=False)
+    vis.window.getMouse()
 
 
 def alt():
     pop = None
-    with open("populations/pop_1.pkl", "rb") as f:
+    with open("populations/pop_final.pkl", "rb") as f:
         pop = pickle.load(f)
 
-    if pop is not None:
-        vis_1 = VisGrid(pop[0], (800, 400), 25, tick_time=0.2)
-        vis_1.save_to_png("grid_save")
-        vis_1.window.close()
+    vis_1 = VisGrid(pop[0], (800, 400), 25, tick_time=0.2)
+    vis_1.save_to_png("grid_save")
+    vis_1.window.close()
 
 
 if __name__ == "__main__":
-    # graph()
+    # graph_fitnesses()
+    # animate_grid()
+    # draw_grids()
     main()
     # alt()
     # test()

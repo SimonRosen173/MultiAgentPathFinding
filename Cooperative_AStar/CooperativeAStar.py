@@ -12,6 +12,8 @@ from typing import Dict, List, Tuple, Set, Optional
 from numba import njit, typed
 import time
 
+from Cooperative_AStar import CooperativeAStarFast
+
 
 def man_dist(node1, node2):
     return abs(node1[0] - node2[0]) + abs(node1[1] - node2[1])
@@ -337,35 +339,35 @@ def test_njit_fn(resv_tbl, resv_locs):
     return [(1,1), (2,2), (3,3)]
 
 
-def cooperative_astar_path_fast(grid,
-                                sources: List[Tuple[int, int]], targets: List[Tuple[int, int]],
-                                resv_tbl: Optional[Set[Tuple[Tuple[int, int], int]]] = None,
-                                # resv_locs - locations reserved from some timestep onwards
-                                resv_locs: Optional[Set[Tuple[int, int]]] = None,
-                                start_t=0) -> Tuple[List[Optional[Optional[List[Tuple[Tuple[int, int], int]]]]], Set]:
-    y_len = len(grid)
-    x_len = len(grid[0])
-
-    start_t = time.time()
-    # note that resv_tbl and resv_locs are (y, x) - I'm pretty sure?
-    # Convert node indexes from tuple to single int. -> Required for njit
-    # yx -> ind     y * x_len + x
-    resv_tbl_ind = set(map(lambda x: (x[0][0] * x_len + x[0][1], x[1]), resv_tbl))
-    resv_locs_ind = set(map(lambda x: x[0] * x_len + x[0], resv_locs))
-    # resv_locs_ind = {key[0] * x_len + key[1]: resv_locs[key] for key in resv_locs}
-
-    print(time.time() - start_t)
-    start_t = time.time()
-    # resv_locs_vals_List = typed.List()
-    # for val in resv_locs_vals:
-    #     resv_locs_vals_List.append(typed.List(val))
-
-    print(time.time() - start_t)
-
-    cooperative_astar_path_njit(grid, sources[0], targets[0], resv_tbl_ind, resv_locs_ind, 0, 250)
-
-    # test_njit_fn(resv_tbl_ind, resv_locs_ind)
-    pass
+# def cooperative_astar_path_fast(grid,
+#                                 sources: List[Tuple[int, int]], targets: List[Tuple[int, int]],
+#                                 resv_tbl: Optional[Set[Tuple[Tuple[int, int], int]]] = None,
+#                                 # resv_locs - locations reserved from some timestep onwards
+#                                 resv_locs: Optional[Set[Tuple[int, int]]] = None,
+#                                 start_t=0) -> Tuple[List[Optional[Optional[List[Tuple[Tuple[int, int], int]]]]], Set]:
+#     y_len = len(grid)
+#     x_len = len(grid[0])
+#
+#     start_t = time.time()
+#     # note that resv_tbl and resv_locs are (y, x) - I'm pretty sure?
+#     # Convert node indexes from tuple to single int. -> Required for njit
+#     # yx -> ind     y * x_len + x
+#     resv_tbl_ind = set(map(lambda x: (x[0][0] * x_len + x[0][1], x[1]), resv_tbl))
+#     resv_locs_ind = set(map(lambda x: x[0] * x_len + x[0], resv_locs))
+#     # resv_locs_ind = {key[0] * x_len + key[1]: resv_locs[key] for key in resv_locs}
+#
+#     print(time.time() - start_t)
+#     start_t = time.time()
+#     # resv_locs_vals_List = typed.List()
+#     # for val in resv_locs_vals:
+#     #     resv_locs_vals_List.append(typed.List(val))
+#
+#     print(time.time() - start_t)
+#
+#     cooperative_astar_path_njit(grid, sources[0], targets[0], resv_tbl_ind, resv_locs_ind, 0, 250)
+#
+#     # test_njit_fn(resv_tbl_ind, resv_locs_ind)
+#     pass
 
 
 def test_njit():
@@ -436,6 +438,32 @@ def main():
     pass
 
 
+def cooperative_astar_path_fast(grid: np.ndarray, source: Tuple[int, int], target: Tuple[int, int],
+                                resv_tbl: Set[Tuple[Tuple[int, int], int]], resv_locs: Set[Tuple[int, int]],
+                                start_t: int,
+                                cutoff_t: int = 500) -> List[Optional[Tuple[Tuple[int, int], int]]]:
+
+    # noinspection PyTypeChecker
+    return CooperativeAStarFast.cooperative_astar_path(grid, source, target, resv_tbl, resv_locs, start_t, cutoff_t)
+
+
+def test_cython():
+    # grid = Warehouse.txt_to_grid("map_warehouse.txt", use_curr_workspace=True, simple_layout=False)
+    num_storage_locs = 560  # 560
+    grid = Warehouse.get_uniform_random_grid((22, 44), num_storage_locs)
+    grid = np.array(grid)
+    # np_arr = np.ones((10, 10), dtype=int)
+    # print(grid.shape)
+    source = (0, 0)
+    target = (4, 2)
+    resv_tbl = {((1, 1), 1)}
+    resv_locs = {(2, 2)}
+    path = CooperativeAStarFast.cooperative_astar_path(grid, source, target, resv_tbl, resv_locs, 0)
+    print(path)
+    # pass
+
+
 if __name__ == "__main__":
     # main()
-    test_njit()
+    # test_njit()
+    test_cython()

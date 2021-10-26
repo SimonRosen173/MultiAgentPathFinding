@@ -50,11 +50,11 @@ class TaskAssigner:
         for y in range(len(grid)):
             for x in range(len(grid[0])):
                 curr_el = grid[y][x]
-                if (y, x) not in self._unreachable_locs:
+                if (x, y) not in self._unreachable_locs:
                     if curr_el == TaskAssigner.PICKUP:
-                        self._pickup_points.append((y, x))
+                        self._pickup_points.append((x, y))
                     elif curr_el == TaskAssigner.DROPOFF:
-                        self._dropoff_points.append((y, x))
+                        self._dropoff_points.append((x, y))
                     elif curr_el == TaskAssigner.OBSTACLE:
                         pass
 
