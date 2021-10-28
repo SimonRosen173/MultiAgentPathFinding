@@ -111,3 +111,12 @@ class Agent:
         completed_tasks = [self.task_history[t] for t in self.task_history.keys() if self.task_history[t] is not None]
         return len(completed_tasks)
 
+    def get_tasks_completed(self):
+        completed_tasks = [self.task_history[t] for t in self.task_history.keys() if self.task_history[t] is not None]
+        return completed_tasks
+
+    def get_tasks_completed_pickups(self):
+        completed_tasks = [self.task_history[t] for t in self.task_history.keys() if self.task_history[t] is not None]
+        completed_tasks_pickups = [task.pickup_point for task in completed_tasks]
+        return completed_tasks_pickups
+
