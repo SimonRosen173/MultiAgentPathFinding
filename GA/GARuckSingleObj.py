@@ -26,6 +26,9 @@ OPT_GRID_SHAPE = (22, 44)
 NO_LOCS = OPT_GRID_SHAPE[0] * OPT_GRID_SHAPE[1]
 STATIC_LOCS_NO = OPT_GRID_SHAPE[0] * opt_grid_start_x
 
+# CROSSOVER_TILE_SIZE = 5
+# CROSSOVER_TILE_NO = 1
+
 
 @njit
 def mutate_flip_bits(a: np.ndarray, p: float = 0.05) -> np.ndarray:
@@ -67,6 +70,26 @@ def one_point_crossover_2d(arr_1: np.ndarray, arr_2: np.ndarray,
 
 
 @njit
+def tiled_crossover(arr_1, arr_2, tile_size, no_tiles=1):
+    assert arr_1.shape == arr_2.shape, "Arrays must be of same shape"
+
+    max_y = arr_1.shape[0] - tile_size
+    max_x = arr_1.shape[1] - tile_size
+    new_arr_1 = arr_1.copy()
+    new_arr_2 = arr_2.copy()
+
+    for i in range(no_tiles):
+        x = np.random.randint(0, max_x + 1)
+        y = np.random.randint(0, max_y + 1)
+        slices = (slice(y, y+tile_size), slice(x, x+tile_size))
+
+        new_arr_1[slices] = arr_2[slices].copy()
+        new_arr_2[slices] = arr_1[slices].copy()
+
+    return new_arr_1, new_arr_2
+
+
+@njit
 def regain_no_storage_locs(arr: np.ndarray) -> np.ndarray:
     no_storage_locs = np.count_nonzero(arr)
 
@@ -88,15 +111,21 @@ def regain_no_storage_locs(arr: np.ndarray) -> np.ndarray:
     return arr
 
 
-# @njit
 def mate(arr_1: np.ndarray, arr_2: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    return mate_njit(arr_1, arr_2)
+
+
+@njit
+def mate_njit(arr_1: np.ndarray, arr_2: np.ndarray, tile_size, tile_no=1) -> Tuple[np.ndarray, np.ndarray]:
     static_arr_1 = arr_1[:, :opt_grid_start_x]
     static_arr_2 = arr_2[:, :opt_grid_start_x]
     opt_arr_1 = arr_1[:, opt_grid_start_x:]
     opt_arr_2 = arr_2[:, opt_grid_start_x:]
 
-    c_pt = (opt_arr_1.shape[0]//2, opt_arr_1.shape[1]//2)
-    opt_c_arr_1, opt_c_arr_2 = one_point_crossover_2d(opt_arr_1, opt_arr_2, c_pt)
+    # c_pt = (opt_arr_1.shape[0]//2, opt_arr_1.shape[1]//2)
+    # opt_c_arr_1, opt_c_arr_2 = one_point_crossover_2d(opt_arr_1, opt_arr_2, c_pt)
+
+    opt_c_arr_1, opt_c_arr_2 = tiled_crossover(opt_arr_1, opt_arr_2, tile_size, tile_no)
 
     # Can't use concatenate cause of njit
     new_shape = (static_arr_1.shape[0], static_arr_1.shape[1] + opt_c_arr_1.shape[1])
@@ -160,6 +189,8 @@ class WarehouseGAModule(ruck.EaModule):
             p_mate: float = 0.5,
             p_mutate: float = 0.5,
             ea_mode: str = 'mu_plus_lambda',
+            mut_tile_no: int = 1,
+            mut_tile_size: int = 5,
             log_interval: int = -1,
             save_interval: int = -1,
             no_generations: int = 0,
@@ -172,8 +203,13 @@ class WarehouseGAModule(ruck.EaModule):
         self.save_interval = save_interval
         self.no_generations = no_generations
         self.pop_save_dir = pop_save_dir
+        self.mut_tile_no = mut_tile_no
+        self.mut_tile_size = mut_tile_size
 
         # self.train_loop_func = partial(train_loop_func, self)
+        def _mate(arr_1: np.ndarray, arr_2: np.ndarray):
+            return mate_njit(arr_1, arr_2,
+                             tile_size=self.mut_tile_size, tile_no=self.mut_tile_no)
 
         # implement the required functions for `EaModule`
         self.generate_offspring, self.select_population = R.make_ea(
@@ -181,7 +217,7 @@ class WarehouseGAModule(ruck.EaModule):
             offspring_num=self.hparams.offspring_num,
             # decorate the functions with `ray_remote_put` which automatically
             # `ray.get` arguments that are `ObjectRef`s and `ray.put`s returned results
-            mate_fn=ray_remote_puts(mate).remote,
+            mate_fn=ray_remote_puts(_mate).remote,
             mutate_fn=ray_remote_put(mutate).remote,
             # efficient to compute locally
             select_fn=functools.partial(R.select_tournament, k=3),
@@ -252,12 +288,15 @@ def main():
     ray.init()
 
     # create and train the population
-    pop_size = 128  # 0
-    n_generations = 2000  # 0
+    pop_size = 64  # 0
+    n_generations = 100  # 0
     no_agents = 5
     no_timesteps = 500
+    using_wandb = False
     log_interval = 250
     save_interval = 500
+    mut_tile_size = 5
+    mut_tile_no = 1
 
     config = {
         "pop_size": pop_size,
@@ -265,17 +304,28 @@ def main():
         "no_agents": no_agents,
         "no_timesteps": no_timesteps,
         "fitness": "no_reachable_locs",
-        "notes": "Optimising no_reachable_locs"
+        "mut_tile_size": mut_tile_size,
+        "mut_tile_no": mut_tile_no,
+        "mate_func": "tiled_crossover"
     }
-    wandb.init(project="GARuck", entity="simonrosen42", config=config)
+    notes = "Trying new mutation operator - tiled_crossover"
 
-    # define our custom x axis metric
-    wandb.define_metric("generation")
-    # define which metrics will be plotted against it
-    wandb.define_metric("perc_reachable_locs_max", step_metric="generation")
-    wandb.define_metric("perc_reachable_locs_mean", step_metric="generation")
+    if using_wandb:
+        wandb.init(project="GARuck", entity="simonrosen42", config=config, notes=notes)
 
-    module = WarehouseGAModule(population_size=pop_size, no_generations=n_generations, no_agents=no_agents, no_timesteps=no_timesteps,
+        # define our custom x axis metric
+        wandb.define_metric("generation")
+        # define which metrics will be plotted against it
+        wandb.define_metric("perc_reachable_locs_max", step_metric="generation")
+        wandb.define_metric("perc_reachable_locs_mean", step_metric="generation")
+    else:
+        log_interval = -1
+        save_interval = -1
+
+    module = WarehouseGAModule(population_size=pop_size,
+                               no_generations=n_generations, no_agents=no_agents,
+                               no_timesteps=no_timesteps,
+                               mut_tile_size=mut_tile_size, mut_tile_no=mut_tile_no,
                                log_interval=log_interval, save_interval=save_interval)
     trainer = Trainer(generations=n_generations, progress=True, is_saving=False, file_suffix="populations/pop")
     pop, logbook, halloffame = trainer.fit(module)
