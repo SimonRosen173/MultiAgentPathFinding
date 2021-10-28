@@ -1,24 +1,29 @@
-import pickle
 import time
-from typing import List, Tuple, Optional, Set, Dict
+import pickle
+from typing import List, Tuple, Optional, Set, Dict, Callable
+import os
 
 from numba import njit, jit
 import numpy as np
 import pandas as pd
 
+from functools import partial
+import wandb
+
 import ruck
-from ruck.external.deap import select_nsga2
-from ruck import *
+# from ruck.external.deap import select_nsga2
+from ruck import R, Trainer
 from ruck.external.ray import *
 
 from Benchmark import Warehouse
-from Grid.GridWrapper import get_no_unreachable_locs
 # from MAPD.TokenPassing import TokenPassing
+from Grid.GridWrapper import get_no_unreachable_locs
 from Visualisations.Vis import VisGrid
 
 opt_grid_start_x = 6
 NO_STORAGE_LOCS = 560
 OPT_GRID_SHAPE = (22, 44)
+NO_LOCS = OPT_GRID_SHAPE[0] * OPT_GRID_SHAPE[1]
 
 
 @njit
@@ -129,13 +134,14 @@ def mutate(arr: np.ndarray) -> np.ndarray:
 
 def evaluate(values: np.ndarray):
     try:
+        values = values.astype(int)
         reachable_locs = get_no_unreachable_locs(values)
         # no_unreachable_locs = tp.get_no_unreachable_locs()
     except Exception as e:  # Bad way to do this but I do not want this to crash after 5hrs of training from a random edge case
-        # print(f"Exception occurred: {e}")
         # tasks_completed = 0
         # no_unreachable_locs = 100000
         reachable_locs = 0
+        print(f"Exception occurred: {e}")
 
     return reachable_locs
 
@@ -144,14 +150,28 @@ class WarehouseGAModule(ruck.EaModule):
     def __init__(
             self,
             population_size: int = 300,
+            no_agents=5,
+            no_timesteps=500,
             offspring_num: int = None,  # offspring_num (lambda) is automatically set to population_size (mu) when `None`
             member_size: int = 100,
             p_mate: float = 0.5,
             p_mutate: float = 0.5,
-            ea_mode: str = 'mu_plus_lambda'
+            ea_mode: str = 'mu_plus_lambda',
+            log_interval: int = -1,
+            save_interval: int = -1,
+            no_generations: int = 0,
+            pop_save_dir: str = ""
     ):
         self._population_size = population_size
         self.save_hyperparameters()
+        self.eval_count = 0
+        self.log_interval = log_interval
+        self.save_interval = save_interval
+        self.no_generations = no_generations
+        self.pop_save_dir = pop_save_dir
+
+        # self.train_loop_func = partial(train_loop_func, self)
+
         # implement the required functions for `EaModule`
         self.generate_offspring, self.select_population = R.make_ea(
             mode=self.hparams.ea_mode,
@@ -161,12 +181,17 @@ class WarehouseGAModule(ruck.EaModule):
             mate_fn=ray_remote_puts(mate).remote,
             mutate_fn=ray_remote_put(mutate).remote,
             # efficient to compute locally
-            select_fn=select_nsga2,  # Does this work?
+            select_fn=functools.partial(R.select_tournament, k=3),
             p_mate=self.hparams.p_mate,
             p_mutate=self.hparams.p_mutate,
             # ENABLE multiprocessing
             map_fn=ray_map,
         )
+
+        # def _eval(values):
+        #     return evaluate(values, no_agents, no_timesteps)
+
+        # eval_partial = partial()
         # eval function, we need to cache it on the class to prevent
         # multiple calls to ray.remote. We use ray.remote instead of
         # ray_remote_put like above because we want the returned values
@@ -174,7 +199,41 @@ class WarehouseGAModule(ruck.EaModule):
         self._ray_eval = ray.remote(evaluate).remote
 
     def evaluate_values(self, values):
-        return ray_map(self._ray_eval, values)
+        out = ray_map(self._ray_eval, values)
+
+        if self.log_interval > -1 and (self.eval_count == 0 or (self.eval_count + 1) % self.log_interval == 0 or self.eval_count + 1 == self.no_generations):
+            # no_locs = OPT_GRID_SHAPE[0] * OPT_GRID_SHAPE[1]
+            # data = [[x, y/NO_LOCS] for (x, y) in out]
+            data = [[x/NO_LOCS] for x in out]
+            table = wandb.Table(data=data, columns=["no_reachable_locs"])
+            gen = self.eval_count+1
+            wandb.log({'my_histogram': wandb.plot.histogram(table, "no_reachable_locs",
+                                                            title=f"Generation = {gen} Histogram of Percentage of Locs Reachable")})
+            # table = wandb.Table(data=data, columns=["unique_tasks_completed", "perc_reachable_locs"])
+            # wandb.log({f"gen_{self.eval_count+1}_tc_vs_ul": wandb.plot.scatter(table, "unique_tasks_completed", "perc_reachable_locs",
+            #                                                                    title=f"Generation = {gen} Unique Tasks Completed Vs Percentage of Locs Reachable")})
+
+        if self.log_interval > -1:
+            log_dict = {
+                "generation": self.eval_count,
+                "no_reachable_locs_max": np.max(out),
+                "no_reachable_locs_mean": np.mean(out)
+            }
+            wandb.log(log_dict)
+
+        if self.save_interval > -1 and (self.eval_count == 0 or (self.eval_count + 1) % self.save_interval == 0 or self.eval_count + 1 == self.no_generations):
+            # data = [[x, y] for (x, y) in out]
+            val_data = list(zip(values, out))
+
+            # TEMP: Need to change this for when on cluster
+            file_name = os.path.join(wandb.run.dir, f"pop_{self.eval_count+1}.pkl")
+            with open(file_name, "wb") as f:
+                pickle.dump(val_data, f)
+
+            wandb.save(file_name)
+
+        self.eval_count += 1
+        return out
 
     # def generate_offspring(self, population):
     #     pass
@@ -187,22 +246,43 @@ class WarehouseGAModule(ruck.EaModule):
 
 def main():
     # initialize ray to use the specified system resources
+    ray.shutdown()
     ray.init()
 
     # create and train the population
-    pop_size = 50  # 0
+    pop_size = 128  # 0
     n_generations = 100  # 0
-    module = WarehouseGAModule(population_size=pop_size)
-    trainer = Trainer(generations=n_generations, progress=True, is_saving=True, file_suffix="populations/pop", save_interval=10)
+    no_agents = 5
+    no_timesteps = 500
+
+    config = {
+        "pop_size": pop_size,
+        "n_generations": n_generations,
+        "no_agents": no_agents,
+        "no_timesteps": no_timesteps,
+        "fitness": "no_reachable_locs",
+        "notes": "Test to see if working"
+    }
+    wandb.init(project="GARuck", entity="simonrosen42", config=config)
+
+    # define our custom x axis metric
+    wandb.define_metric("generation")
+    # define which metrics will be plotted against it
+    wandb.define_metric("no_reachable_locs_max", step_metric="generation")
+    wandb.define_metric("no_reachable_locs_mean", step_metric="generation")
+
+    module = WarehouseGAModule(population_size=pop_size, no_generations=n_generations, no_agents=no_agents, no_timesteps=no_timesteps,
+                               log_interval=5, save_interval=5)
+    trainer = Trainer(generations=n_generations, progress=True, is_saving=False, file_suffix="populations/pop")
     pop, logbook, halloffame = trainer.fit(module)
     # pop_vals = [member.value for member in pop]
 
-    with open("stats/hist.pkl", "wb") as f:
-        pickle.dump(logbook.history, f)
-
-    with open("populations/pop_final.pkl", "wb") as f:
-        vals = [ray.get(member.value) for member in pop]
-        pickle.dump(vals, f)
+    # with open("stats/hist.pkl", "wb") as f:
+    #     pickle.dump(logbook.history, f)
+    #
+    # with open("populations/pop_final.pkl", "wb") as f:
+    #     vals = [ray.get(member.value) for member in pop]
+    #     pickle.dump(vals, f)
 
     # # Not the best way to choose 'best' individuals but should give a reasonable idea of how well GA is performing
     # sorted_members = sorted(pop, key=lambda x: x.fitness[0] + x.fitness[1])
@@ -226,6 +306,15 @@ def main():
     #     vis.save_to_png(f"best/best_grid_{i}")
     #     vis.window.close()
     # print(type())
+
+
+if __name__ == "__main__":
+    # graph_fitnesses()
+    # animate_grid()
+    # draw_grids()
+    main()
+    # alt()
+    # test()
 
 
 if __name__ == "__main__":

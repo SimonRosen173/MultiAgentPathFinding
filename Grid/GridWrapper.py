@@ -15,4 +15,4 @@ if __name__ == "__main__":
 
 
 def get_no_unreachable_locs(grid: np.ndarray) -> int:
-    return grid_fast.get_no_reachable_locs(grid)
+    return grid_fast.get_no_reachable_locs(grid, 0, 0)
