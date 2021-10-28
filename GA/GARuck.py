@@ -381,8 +381,8 @@ def main():
     ray.init()
 
     # create and train the population
-    pop_size = 64  # 0
-    n_generations = 1000  # 0
+    pop_size = 128  # 0
+    n_generations = 500  # 0
     no_agents = 5
     no_timesteps = 500
 
@@ -392,7 +392,7 @@ def main():
         "no_agents": no_agents,
         "no_timesteps": no_timesteps,
         "fitness": "unique_tasks_completed, no_reachable_locs",
-        "notes": ""
+        "notes": "Seeing affect of increasing pop_size"
     }
     wandb.init(project="GARuck", entity="simonrosen42", config=config)
     # define our custom x axis metric
@@ -402,7 +402,7 @@ def main():
     # wandb.define_metric("no_unreachable_locs", step_metric="generation")
 
     module = WarehouseGAModule(population_size=pop_size, no_generations=n_generations, no_agents=no_agents, no_timesteps=no_timesteps,
-                               log_interval=100, save_interval=200)
+                               log_interval=100, save_interval=250)
     trainer = Trainer(generations=n_generations, progress=True, is_saving=False, file_suffix="populations/pop", save_interval=50)
     pop, logbook, halloffame = trainer.fit(module)
     # pop_vals = [member.value for member in pop]
