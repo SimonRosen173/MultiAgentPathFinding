@@ -24,6 +24,7 @@ opt_grid_start_x = 6
 NO_STORAGE_LOCS = 560
 OPT_GRID_SHAPE = (22, 44)
 NO_LOCS = OPT_GRID_SHAPE[0] * OPT_GRID_SHAPE[1]
+STATIC_LOCS_NO = OPT_GRID_SHAPE[0] * opt_grid_start_x
 
 
 @njit
@@ -135,7 +136,9 @@ def mutate(arr: np.ndarray) -> np.ndarray:
 def evaluate(values: np.ndarray):
     try:
         values = values.astype(int)
-        reachable_locs = get_no_unreachable_locs(values)
+        # print(values.shape, STATIC_LOCS_NO, NO_LOCS)
+        reachable_locs =  get_no_unreachable_locs(values) - STATIC_LOCS_NO
+        # print(reachable_locs, STATIC_LOCS_NO)
         # no_unreachable_locs = tp.get_no_unreachable_locs()
     except Exception as e:  # Bad way to do this but I do not want this to crash after 5hrs of training from a random edge case
         # tasks_completed = 0
@@ -207,7 +210,7 @@ class WarehouseGAModule(ruck.EaModule):
             data = [[x/NO_LOCS] for x in out]
             table = wandb.Table(data=data, columns=["no_reachable_locs"])
             gen = self.eval_count+1
-            wandb.log({'my_histogram': wandb.plot.histogram(table, "no_reachable_locs",
+            wandb.log({f'gen_{gen}_reach_locs_hist': wandb.plot.histogram(table, "no_reachable_locs",
                                                             title=f"Generation = {gen} Histogram of Percentage of Locs Reachable")})
             # table = wandb.Table(data=data, columns=["unique_tasks_completed", "perc_reachable_locs"])
             # wandb.log({f"gen_{self.eval_count+1}_tc_vs_ul": wandb.plot.scatter(table, "unique_tasks_completed", "perc_reachable_locs",
@@ -216,8 +219,8 @@ class WarehouseGAModule(ruck.EaModule):
         if self.log_interval > -1:
             log_dict = {
                 "generation": self.eval_count,
-                "no_reachable_locs_max": np.max(out),
-                "no_reachable_locs_mean": np.mean(out)
+                "perc_reachable_locs_max": np.max(out)/NO_LOCS,
+                "perc_reachable_locs_mean": np.mean(out)/NO_LOCS
             }
             wandb.log(log_dict)
 
@@ -246,14 +249,15 @@ class WarehouseGAModule(ruck.EaModule):
 
 def main():
     # initialize ray to use the specified system resources
-    ray.shutdown()
     ray.init()
 
     # create and train the population
     pop_size = 128  # 0
-    n_generations = 100  # 0
+    n_generations = 2000  # 0
     no_agents = 5
     no_timesteps = 500
+    log_interval = 250
+    save_interval = 500
 
     config = {
         "pop_size": pop_size,
@@ -261,18 +265,18 @@ def main():
         "no_agents": no_agents,
         "no_timesteps": no_timesteps,
         "fitness": "no_reachable_locs",
-        "notes": "Test to see if working"
+        "notes": "Optimising no_reachable_locs"
     }
     wandb.init(project="GARuck", entity="simonrosen42", config=config)
 
     # define our custom x axis metric
     wandb.define_metric("generation")
     # define which metrics will be plotted against it
-    wandb.define_metric("no_reachable_locs_max", step_metric="generation")
-    wandb.define_metric("no_reachable_locs_mean", step_metric="generation")
+    wandb.define_metric("perc_reachable_locs_max", step_metric="generation")
+    wandb.define_metric("perc_reachable_locs_mean", step_metric="generation")
 
     module = WarehouseGAModule(population_size=pop_size, no_generations=n_generations, no_agents=no_agents, no_timesteps=no_timesteps,
-                               log_interval=5, save_interval=5)
+                               log_interval=log_interval, save_interval=save_interval)
     trainer = Trainer(generations=n_generations, progress=True, is_saving=False, file_suffix="populations/pop")
     pop, logbook, halloffame = trainer.fit(module)
     # pop_vals = [member.value for member in pop]
@@ -306,15 +310,6 @@ def main():
     #     vis.save_to_png(f"best/best_grid_{i}")
     #     vis.window.close()
     # print(type())
-
-
-if __name__ == "__main__":
-    # graph_fitnesses()
-    # animate_grid()
-    # draw_grids()
-    main()
-    # alt()
-    # test()
 
 
 if __name__ == "__main__":
