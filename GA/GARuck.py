@@ -1,6 +1,8 @@
 import pickle
 import time
-from typing import List, Tuple, Optional, Set, Dict
+from typing import List, Tuple, Optional, Set, Dict, Callable
+
+import os
 
 from numba import njit, jit
 import numpy as np
@@ -14,10 +16,14 @@ from ruck.external.ray import *
 from Benchmark import Warehouse
 from MAPD.TokenPassing import TokenPassing
 from Visualisations.Vis import VisGrid
+from functools import partial
+
+import wandb
 
 opt_grid_start_x = 6
 NO_STORAGE_LOCS = 560
 OPT_GRID_SHAPE = (22, 44)
+NO_LOCS = OPT_GRID_SHAPE[0] * OPT_GRID_SHAPE[1]
 
 
 @njit
@@ -126,31 +132,37 @@ def mutate(arr: np.ndarray) -> np.ndarray:
     return arr
 
 
-def evaluate(values: np.ndarray):
+def evaluate(values: np.ndarray, no_agents: int, no_timesteps: int):
     try:
         # noinspection PyTypeChecker
         grid: List = values.tolist()  # This is a list, why PyCharm...
         # print("Evaluating... ")
         y_len = len(grid)
         x_len = len(grid[0])
-        no_agents = 5
-        max_t = 500
+        # no_agents = 5
+        # no_timesteps = 500
 
         non_task_endpoints = [(0, y) for y in range(y_len)]
         start_locs = non_task_endpoints[:no_agents]
 
-        tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, max_t, task_frequency=1,
+        tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, no_timesteps, task_frequency=1,
                           is_logging_collisions=True)
         final_agents = tp.compute()
-        tasks_completed = tp.get_no_tasks_completed()
+        # tasks_completed = tp.get_no_tasks_completed()
+        unique_tasks_completed = tp.get_no_unique_tasks_completed()
+        # print(unique_tasks_completed)
         no_unreachable_locs = tp.get_no_unreachable_locs()
+        reachable_locs = NO_LOCS - no_unreachable_locs
     except Exception as e:  # Bad way to do this but I do not want this to crash after 5hrs of training from a random edge case
         print(f"Exception occurred: {e}")
         tasks_completed = 0
-        no_unreachable_locs = 100000
+        reachable_locs = 0
+        unique_tasks_completed = 0
 
     # Maximising tasks_completed and minimising no_unreachable_locs
-    return tasks_completed, -1 * no_unreachable_locs
+    # return tasks_completed, -1 * no_unreachable_locs
+    return unique_tasks_completed, reachable_locs  #-1 * no_unreachable_locs
+
     # return 1, 1
 
 
@@ -158,14 +170,28 @@ class WarehouseGAModule(ruck.EaModule):
     def __init__(
             self,
             population_size: int = 300,
+            no_agents=5,
+            no_timesteps=500,
             offspring_num: int = None,  # offspring_num (lambda) is automatically set to population_size (mu) when `None`
             member_size: int = 100,
             p_mate: float = 0.5,
             p_mutate: float = 0.5,
-            ea_mode: str = 'mu_plus_lambda'
+            ea_mode: str = 'mu_plus_lambda',
+            log_interval: int = -1,
+            save_interval: int = -1,
+            no_generations: int = 0,
+            pop_save_dir: str = ""
     ):
         self._population_size = population_size
         self.save_hyperparameters()
+        self.eval_count = 0
+        self.log_interval = log_interval
+        self.save_interval = save_interval
+        self.no_generations = no_generations
+        self.pop_save_dir = pop_save_dir
+
+        # self.train_loop_func = partial(train_loop_func, self)
+
         # implement the required functions for `EaModule`
         self.generate_offspring, self.select_population = R.make_ea(
             mode=self.hparams.ea_mode,
@@ -181,14 +207,41 @@ class WarehouseGAModule(ruck.EaModule):
             # ENABLE multiprocessing
             map_fn=ray_map,
         )
+
+        def _eval(values):
+            return evaluate(values, no_agents, no_timesteps)
+
+        # eval_partial = partial()
         # eval function, we need to cache it on the class to prevent
         # multiple calls to ray.remote. We use ray.remote instead of
         # ray_remote_put like above because we want the returned values
         # not object refs to those values.
-        self._ray_eval = ray.remote(evaluate).remote
+        self._ray_eval = ray.remote(_eval).remote
 
     def evaluate_values(self, values):
-        return ray_map(self._ray_eval, values)
+        out = ray_map(self._ray_eval, values)
+
+        if self.log_interval > -1 and (self.eval_count == 0 or (self.eval_count + 1) % self.log_interval == 0 or self.eval_count + 1 == self.no_generations):
+            # no_locs = OPT_GRID_SHAPE[0] * OPT_GRID_SHAPE[1]
+            data = [[x, y/NO_LOCS] for (x, y) in out]
+            table = wandb.Table(data=data, columns=["unique_tasks_completed", "perc_reachable_locs"])
+            gen = self.eval_count+1
+            wandb.log({f"gen_{self.eval_count+1}_tc_vs_ul": wandb.plot.scatter(table, "unique_tasks_completed", "perc_reachable_locs",
+                                                                 title=f"Generation = {gen} Unique Tasks Completed Vs Percentage of Locs Reachable")})
+
+        if self.save_interval > -1 and (self.eval_count == 0 or (self.eval_count + 1) % self.save_interval == 0 or self.eval_count + 1 == self.no_generations):
+            data = [[x, y] for (x, y) in out]
+            val_data = list(zip(values, data))
+
+            # TEMP: Need to change this for when on cluster
+            file_name = os.path.join(wandb.run.dir, f"pop_{self.eval_count+1}.pkl")
+            with open(file_name, "wb") as f:
+                pickle.dump(val_data, f)
+
+            wandb.save(file_name)
+
+        self.eval_count += 1
+        return out
 
     # def generate_offspring(self, population):
     #     pass
@@ -199,47 +252,12 @@ class WarehouseGAModule(ruck.EaModule):
                 for _ in range(self.hparams.population_size)]
 
 
-def main():
-    # initialize ray to use the specified system resources
-    ray.init()
-
-    # create and train the population
-    pop_size = 50  # 0
-    n_generations = 100  # 0
-    module = WarehouseGAModule(population_size=pop_size)
-    trainer = Trainer(generations=n_generations, progress=True, is_saving=True, file_suffix="populations/pop", save_interval=10)
-    pop, logbook, halloffame = trainer.fit(module)
-    # pop_vals = [member.value for member in pop]
-
-    with open("stats/hist.pkl", "wb") as f:
-        pickle.dump(logbook.history, f)
-
-    with open("populations/pop_final.pkl", "wb") as f:
-        vals = [ray.get(member.value) for member in pop]
-        pickle.dump(vals, f)
-
-    # # Not the best way to choose 'best' individuals but should give a reasonable idea of how well GA is performing
-    # sorted_members = sorted(pop, key=lambda x: x.fitness[0] + x.fitness[1])
-    # for i in range(5):
-    #     curr_grid = ray.get(sorted_members[i].value)
-    #     vis = VisGrid(curr_grid, (800, 400), 25, tick_time=0.2)
-    #     vis.save_to_png(f"best/best_grid_{i}")
-    #     vis.window.close()
-
-    print('initial stats:', logbook[0])
-    print('final stats:', logbook[-1])
-    # print('best member:', halloffame.members[0])
-
-    # best_member = halloffame.members[0]
-    # obj_ref = best_member.value
-    # best_grid = ray.get(obj_ref)
-    #
-    # for i, member in enumerate(halloffame.members):
-    #     curr_grid = ray.get(best_member.value)
-    #     vis = VisGrid(curr_grid, (800, 400), 25, tick_time=0.2)
-    #     vis.save_to_png(f"best/best_grid_{i}")
-    #     vis.window.close()
-    # print(type())
+# def wandb_log(module):
+#     # print(module)
+#     # wandb.log({
+#     #     ""
+#     # })
+#     pass
 
 
 def test():
@@ -280,11 +298,13 @@ def test():
 
 
 def graph_fitnesses():
-    for pop_name in ["final", "0", "500"]:
+    for pop_name in ["final"]: #, "0", "500"]:
         pop = None
         with open(f"populations/pop_{pop_name}.pkl", "rb") as f:
             pop = pickle.load(f)
 
+        no_agents = 5
+        no_timesteps = 500
         tasks_completed_arr = []
         no_unreachable_locs_arr = []
         print(f"Re-evaluating fitnesses for {pop_name}...")
@@ -292,7 +312,7 @@ def graph_fitnesses():
         if pop is not None:
             for i, member in enumerate(pop):
                 print(f"Re-evaluating {i+1}/{len(pop)}...")
-                tasks_completed, no_unreachable_locs = evaluate(member)
+                tasks_completed, no_unreachable_locs = evaluate(member, no_agents=no_agents, no_timesteps=no_timesteps)
                 no_unreachable_locs *= -1
                 tasks_completed_arr.append(tasks_completed)
                 no_unreachable_locs_arr.append(no_unreachable_locs)
@@ -312,7 +332,8 @@ def draw_grids():
         pop = pickle.load(f)
 
     if pop is not None:
-        vis_1 = VisGrid(pop[103], (800, 400), 25, tick_time=0.2)
+        vis_1 = VisGrid(pop[62], (800, 400), 25, tick_time=0.2)
+        vis_1.window.getMouse()
         vis_1.save_to_png(f"best/final_103")
         vis_1.window.close()
 
@@ -353,6 +374,68 @@ def alt():
     vis_1 = VisGrid(pop[0], (800, 400), 25, tick_time=0.2)
     vis_1.save_to_png("grid_save")
     vis_1.window.close()
+
+
+def main():
+    # initialize ray to use the specified system resources
+    ray.init()
+
+    # create and train the population
+    pop_size = 128  # 0
+    n_generations = 500  # 0
+    no_agents = 5
+    no_timesteps = 500
+
+    config = {
+        "pop_size": pop_size,
+        "n_generations": n_generations,
+        "no_agents": no_agents,
+        "no_timesteps": no_timesteps,
+        "fitness": "unique_tasks_completed, no_reachable_locs",
+        "notes": "Seeing affect of increasing pop_size"
+    }
+    wandb.init(project="GARuck", entity="simonrosen42", config=config)
+    # define our custom x axis metric
+    # wandb.define_metric("generation")
+    # # define which metrics will be plotted against it
+    # wandb.define_metric("tasks_completed", step_metric="generation")
+    # wandb.define_metric("no_unreachable_locs", step_metric="generation")
+
+    module = WarehouseGAModule(population_size=pop_size, no_generations=n_generations, no_agents=no_agents, no_timesteps=no_timesteps,
+                               log_interval=100, save_interval=250)
+    trainer = Trainer(generations=n_generations, progress=True, is_saving=False, file_suffix="populations/pop", save_interval=50)
+    pop, logbook, halloffame = trainer.fit(module)
+    # pop_vals = [member.value for member in pop]
+
+    # with open("stats/hist.pkl", "wb") as f:
+    #     pickle.dump(logbook.history, f)
+    #
+    # with open("populations/pop_final.pkl", "wb") as f:
+    #     vals = [ray.get(member.value) for member in pop]
+    #     pickle.dump(vals, f)
+
+    # # Not the best way to choose 'best' individuals but should give a reasonable idea of how well GA is performing
+    # sorted_members = sorted(pop, key=lambda x: x.fitness[0] + x.fitness[1])
+    # for i in range(5):
+    #     curr_grid = ray.get(sorted_members[i].value)
+    #     vis = VisGrid(curr_grid, (800, 400), 25, tick_time=0.2)
+    #     vis.save_to_png(f"best/best_grid_{i}")
+    #     vis.window.close()
+
+    print('initial stats:', logbook[0])
+    print('final stats:', logbook[-1])
+    # print('best member:', halloffame.members[0])
+
+    # best_member = halloffame.members[0]
+    # obj_ref = best_member.value
+    # best_grid = ray.get(obj_ref)
+    #
+    # for i, member in enumerate(halloffame.members):
+    #     curr_grid = ray.get(best_member.value)
+    #     vis = VisGrid(curr_grid, (800, 400), 25, tick_time=0.2)
+    #     vis.save_to_png(f"best/best_grid_{i}")
+    #     vis.window.close()
+    # print(type())
 
 
 if __name__ == "__main__":

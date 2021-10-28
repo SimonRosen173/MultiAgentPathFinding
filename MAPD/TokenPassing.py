@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 from numpy import random
 from numba import njit
+from itertools import chain
 
 # random.seed(42)
 
@@ -360,6 +361,14 @@ class TokenPassing:
 
     def get_no_tasks_completed(self) -> int:
         return sum([agent.get_no_tasks_completed() for agent in self._agents])
+
+    def get_no_unique_tasks_completed(self) -> int:
+        task_pickups = [agent.get_tasks_completed_pickups() for agent in self._agents]
+        task_pickups = list(chain(*task_pickups))
+        # print(task_pickups)
+        values, counts = np.unique(task_pickups, return_counts=True)
+        # print(f"Not unique length: {len(task_pickups)} \t Is unique length: {len(values)}")
+        return len(values)
 
     def get_no_unreachable_locs(self) -> int:
         return len(self._unreachable_locs)
