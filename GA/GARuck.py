@@ -405,37 +405,9 @@ def main():
                                log_interval=100, save_interval=250)
     trainer = Trainer(generations=n_generations, progress=True, is_saving=False, file_suffix="populations/pop", save_interval=50)
     pop, logbook, halloffame = trainer.fit(module)
-    # pop_vals = [member.value for member in pop]
-
-    # with open("stats/hist.pkl", "wb") as f:
-    #     pickle.dump(logbook.history, f)
-    #
-    # with open("populations/pop_final.pkl", "wb") as f:
-    #     vals = [ray.get(member.value) for member in pop]
-    #     pickle.dump(vals, f)
-
-    # # Not the best way to choose 'best' individuals but should give a reasonable idea of how well GA is performing
-    # sorted_members = sorted(pop, key=lambda x: x.fitness[0] + x.fitness[1])
-    # for i in range(5):
-    #     curr_grid = ray.get(sorted_members[i].value)
-    #     vis = VisGrid(curr_grid, (800, 400), 25, tick_time=0.2)
-    #     vis.save_to_png(f"best/best_grid_{i}")
-    #     vis.window.close()
 
     print('initial stats:', logbook[0])
     print('final stats:', logbook[-1])
-    # print('best member:', halloffame.members[0])
-
-    # best_member = halloffame.members[0]
-    # obj_ref = best_member.value
-    # best_grid = ray.get(obj_ref)
-    #
-    # for i, member in enumerate(halloffame.members):
-    #     curr_grid = ray.get(best_member.value)
-    #     vis = VisGrid(curr_grid, (800, 400), 25, tick_time=0.2)
-    #     vis.save_to_png(f"best/best_grid_{i}")
-    #     vis.window.close()
-    # print(type())
 
 
 if __name__ == "__main__":
