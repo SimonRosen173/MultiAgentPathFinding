@@ -1,35 +1,29 @@
-import time
 import pickle
+import time
 from typing import List, Tuple, Optional, Set, Dict, Callable
+
 import os
-import shutil
-import argparse
 
 from numba import njit, jit
 import numpy as np
 import pandas as pd
 
-from functools import partial
-import wandb
-
 import ruck
 from ruck.external.deap import select_nsga2
-from ruck import R, Trainer
+from ruck import *
 from ruck.external.ray import *
 
 from Benchmark import Warehouse
 from MAPD.TokenPassing import TokenPassing
-from Grid.GridWrapper import get_no_unreachable_locs
 from Visualisations.Vis import VisGrid
+from functools import partial
+
+import wandb
 
 opt_grid_start_x = 6
 NO_STORAGE_LOCS = 560
 OPT_GRID_SHAPE = (22, 44)
 NO_LOCS = OPT_GRID_SHAPE[0] * OPT_GRID_SHAPE[1]
-STATIC_LOCS_NO = OPT_GRID_SHAPE[0] * opt_grid_start_x
-
-# CROSSOVER_TILE_SIZE = 5
-# CROSSOVER_TILE_NO = 1
 
 
 @njit
@@ -72,26 +66,6 @@ def one_point_crossover_2d(arr_1: np.ndarray, arr_2: np.ndarray,
 
 
 @njit
-def tiled_crossover(arr_1, arr_2, tile_size, no_tiles=1):
-    assert arr_1.shape == arr_2.shape, "Arrays must be of same shape"
-
-    max_y = arr_1.shape[0] - tile_size
-    max_x = arr_1.shape[1] - tile_size
-    new_arr_1 = arr_1.copy()
-    new_arr_2 = arr_2.copy()
-
-    for i in range(no_tiles):
-        x = np.random.randint(0, max_x + 1)
-        y = np.random.randint(0, max_y + 1)
-        slices = (slice(y, y+tile_size), slice(x, x+tile_size))
-
-        new_arr_1[slices] = arr_2[slices].copy()
-        new_arr_2[slices] = arr_1[slices].copy()
-
-    return new_arr_1, new_arr_2
-
-
-@njit
 def regain_no_storage_locs(arr: np.ndarray) -> np.ndarray:
     no_storage_locs = np.count_nonzero(arr)
 
@@ -113,21 +87,15 @@ def regain_no_storage_locs(arr: np.ndarray) -> np.ndarray:
     return arr
 
 
+# @njit
 def mate(arr_1: np.ndarray, arr_2: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    return mate_njit(arr_1, arr_2)
-
-
-@njit
-def mate_njit(arr_1: np.ndarray, arr_2: np.ndarray, tile_size, tile_no=1) -> Tuple[np.ndarray, np.ndarray]:
     static_arr_1 = arr_1[:, :opt_grid_start_x]
     static_arr_2 = arr_2[:, :opt_grid_start_x]
     opt_arr_1 = arr_1[:, opt_grid_start_x:]
     opt_arr_2 = arr_2[:, opt_grid_start_x:]
 
-    # c_pt = (opt_arr_1.shape[0]//2, opt_arr_1.shape[1]//2)
-    # opt_c_arr_1, opt_c_arr_2 = one_point_crossover_2d(opt_arr_1, opt_arr_2, c_pt)
-
-    opt_c_arr_1, opt_c_arr_2 = tiled_crossover(opt_arr_1, opt_arr_2, tile_size, tile_no)
+    c_pt = (opt_arr_1.shape[0]//2, opt_arr_1.shape[1]//2)
+    opt_c_arr_1, opt_c_arr_2 = one_point_crossover_2d(opt_arr_1, opt_arr_2, c_pt)
 
     # Can't use concatenate cause of njit
     new_shape = (static_arr_1.shape[0], static_arr_1.shape[1] + opt_c_arr_1.shape[1])
@@ -166,9 +134,13 @@ def mutate(arr: np.ndarray) -> np.ndarray:
 
 def evaluate(values: np.ndarray, no_agents: int, no_timesteps: int):
     try:
+        # noinspection PyTypeChecker
         grid: List = values.tolist()  # This is a list, why PyCharm...
+        # print("Evaluating... ")
         y_len = len(grid)
         x_len = len(grid[0])
+        # no_agents = 5
+        # no_timesteps = 500
 
         non_task_endpoints = [(0, y) for y in range(y_len)]
         start_locs = non_task_endpoints[:no_agents]
@@ -176,6 +148,7 @@ def evaluate(values: np.ndarray, no_agents: int, no_timesteps: int):
         tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, no_timesteps, task_frequency=1,
                           is_logging_collisions=True)
         final_agents = tp.compute()
+        # tasks_completed = tp.get_no_tasks_completed()
         unique_tasks_completed = tp.get_no_unique_tasks_completed()
         # print(unique_tasks_completed)
         no_unreachable_locs = tp.get_no_unreachable_locs()
@@ -186,7 +159,11 @@ def evaluate(values: np.ndarray, no_agents: int, no_timesteps: int):
         reachable_locs = 0
         unique_tasks_completed = 0
 
-    return unique_tasks_completed, reachable_locs
+    # Maximising tasks_completed and minimising no_unreachable_locs
+    # return tasks_completed, -1 * no_unreachable_locs
+    return unique_tasks_completed, reachable_locs  #-1 * no_unreachable_locs
+
+    # return 1, 1
 
 
 class WarehouseGAModule(ruck.EaModule):
@@ -200,8 +177,6 @@ class WarehouseGAModule(ruck.EaModule):
             p_mate: float = 0.5,
             p_mutate: float = 0.5,
             ea_mode: str = 'mu_plus_lambda',
-            mut_tile_no: int = 1,
-            mut_tile_size: int = 5,
             log_interval: int = -1,
             save_interval: int = -1,
             no_generations: int = 0,
@@ -214,13 +189,8 @@ class WarehouseGAModule(ruck.EaModule):
         self.save_interval = save_interval
         self.no_generations = no_generations
         self.pop_save_dir = pop_save_dir
-        self.mut_tile_no = mut_tile_no
-        self.mut_tile_size = mut_tile_size
 
         # self.train_loop_func = partial(train_loop_func, self)
-        def _mate(arr_1: np.ndarray, arr_2: np.ndarray):
-            return mate_njit(arr_1, arr_2,
-                             tile_size=self.mut_tile_size, tile_no=self.mut_tile_no)
 
         # implement the required functions for `EaModule`
         self.generate_offspring, self.select_population = R.make_ea(
@@ -228,11 +198,10 @@ class WarehouseGAModule(ruck.EaModule):
             offspring_num=self.hparams.offspring_num,
             # decorate the functions with `ray_remote_put` which automatically
             # `ray.get` arguments that are `ObjectRef`s and `ray.put`s returned results
-            mate_fn=ray_remote_puts(_mate).remote,
+            mate_fn=ray_remote_puts(mate).remote,
             mutate_fn=ray_remote_put(mutate).remote,
             # efficient to compute locally
-            # select_fn=functools.partial(R.select_tournament, k=3),
-            select_fn=select_nsga2,
+            select_fn=select_nsga2,  # Does this work?
             p_mate=self.hparams.p_mate,
             p_mutate=self.hparams.p_mutate,
             # ENABLE multiprocessing
@@ -251,52 +220,20 @@ class WarehouseGAModule(ruck.EaModule):
 
     def evaluate_values(self, values):
         out = ray_map(self._ray_eval, values)
-        data = None
 
-        # wandb Stuff
         if self.log_interval > -1 and (self.eval_count == 0 or (self.eval_count + 1) % self.log_interval == 0 or self.eval_count + 1 == self.no_generations):
             # no_locs = OPT_GRID_SHAPE[0] * OPT_GRID_SHAPE[1]
-            # unique_tasks_completed, reachable_locs
-            # data = [[x, y/NO_LOCS] for (x, y) in out]
+            data = [[x, y/NO_LOCS] for (x, y) in out]
+            table = wandb.Table(data=data, columns=["unique_tasks_completed", "perc_reachable_locs"])
             gen = self.eval_count+1
-            data = [[x, y/NO_LOCS, gen] for (x, y) in out]
-            table = wandb.Table(data=data, columns=["unique_tasks_completed", "perc_reachable_locs", "gen"])
-            wandb.log({f'gen_{gen}_reach_locs_hist': wandb.plot.histogram(table, "perc_reachable_locs",
-                                                            title=f"Generation = {gen} Histogram of Percentage of Locs Reachable")})
-            wandb.log({f'gen_{gen}_unique_tasks_hist': wandb.plot.histogram(table, "unique_tasks_completed",
-                                                                          title=f"Generation = {gen} Histogram of No of Unique Tasks Completed")})
-            # table = wandb.Table(data=data, columns=["unique_tasks_completed", "perc_reachable_locs"])
-            # wandb.log({f"gen_{self.eval_count+1}_tc_vs_ul": wandb.plot.scatter(table, "unique_tasks_completed", "perc_reachable_locs",
-            #                                                                    title=f"Generation = {gen} Unique Tasks Completed Vs Percentage of Locs Reachable")})
-
-        if self.log_interval > -1:
-            reachable_locs = [y for (x, y) in out]
-            unique_tasks_completed = [x for (x, y) in out]
-            log_dict = {
-                "generation": self.eval_count,
-                "perc_reachable_locs_max": np.max(reachable_locs)/NO_LOCS,
-                "perc_reachable_locs_mean": np.mean(reachable_locs)/NO_LOCS,
-                "perc_reachable_locs_min": np.min(reachable_locs)/NO_LOCS,
-                "perc_reachable_locs_var": np.var(reachable_locs)/NO_LOCS,
-
-                "unique_tasks_completed_max": np.max(unique_tasks_completed)/NO_LOCS,
-                "unique_tasks_completed_mean": np.mean(unique_tasks_completed)/NO_LOCS,
-                "unique_tasks_completed_min": np.min(unique_tasks_completed)/NO_LOCS,
-                "unique_tasks_completed_var": np.var(unique_tasks_completed)/NO_LOCS,
-            }
-            wandb.log(log_dict)
-            # tbl_data = [[x, y, self.eval_count+1] for (x, y) in data]
-            if data is None:
-                gen = self.eval_count+1
-                data = [[x, y/NO_LOCS, gen] for (x, y) in out]
-
-            fitness_table = wandb.Table(columns=["unique_tasks_completed", "reachable_locs", "gen"], data=data)
-            wandb.log({"fitness_table": fitness_table})
+            wandb.log({f"gen_{self.eval_count+1}_tc_vs_ul": wandb.plot.scatter(table, "unique_tasks_completed", "perc_reachable_locs",
+                                                                 title=f"Generation = {gen} Unique Tasks Completed Vs Percentage of Locs Reachable")})
 
         if self.save_interval > -1 and (self.eval_count == 0 or (self.eval_count + 1) % self.save_interval == 0 or self.eval_count + 1 == self.no_generations):
-            # data = [[x, y] for (x, y) in out]
-            val_data = list(zip(values, out))
+            data = [[x, y] for (x, y) in out]
+            val_data = list(zip(values, data))
 
+            # TEMP: Need to change this for when on cluster
             file_name = os.path.join(wandb.run.dir, f"pop_{self.eval_count+1}.pkl")
             with open(file_name, "wb") as f:
                 pickle.dump(val_data, f)
@@ -315,120 +252,196 @@ class WarehouseGAModule(ruck.EaModule):
                 for _ in range(self.hparams.population_size)]
 
 
-def train(pop_size, n_generations, n_agents,
-          n_timesteps, mut_tile_size, mut_tile_no,
-          using_wandb, log_interval, save_interval,
-          cluster_node,
-          run_notes, run_name):
+# def wandb_log(module):
+#     # print(module)
+#     # wandb.log({
+#     #     ""
+#     # })
+#     pass
+
+
+def test():
+    grid_1 = Warehouse.get_uniform_random_grid(OPT_GRID_SHAPE, NO_STORAGE_LOCS)
+    grid_2 = Warehouse.get_uniform_random_grid(OPT_GRID_SHAPE, NO_STORAGE_LOCS)
+
+    vis_1 = VisGrid(grid_1, (800, 400), 25, tick_time=0.2)
+    vis_1.save_to_png("grid_1")
+    vis_1.window.close()
+
+    vis_2 = VisGrid(grid_2, (800, 400), 25, tick_time=0.2)
+    vis_2.save_to_png("grid_2")
+    vis_2.window.close()
+
+    np_grid_1 = np.array(grid_1)
+    np_grid_2 = np.array(grid_2)
+
+    # start = time.time()
+    # for _ in range(1):
+    #     c_grid_1, c_grid_2 = mate(np_grid_1, np_grid_2)
+    # print(f"Time elapsed: {time.time() - start}")
+
+    c_grid_1, c_grid_2 = mate(np_grid_1, np_grid_2)
+    c_vis_1 = VisGrid(c_grid_1, (800, 400), 25, tick_time=0.2)
+    c_vis_1.save_to_png("c_grid_1")
+    c_vis_1.window.close()
+
+    c_vis_2 = VisGrid(c_grid_2, (800, 400), 25, tick_time=0.2)
+    c_vis_2.save_to_png("c_grid_2")
+    c_vis_2.window.close()
+
+    mut_grid = mutate(np_grid_1)
+    mut_vis = VisGrid(mut_grid, (800, 400), 25, tick_time=0.2)
+    mut_vis.save_to_png("mut_vis")
+    mut_vis.window.close()
+
+    pass
+
+
+def graph_fitnesses():
+    for pop_name in ["final"]: #, "0", "500"]:
+        pop = None
+        with open(f"populations/pop_{pop_name}.pkl", "rb") as f:
+            pop = pickle.load(f)
+
+        no_agents = 5
+        no_timesteps = 500
+        tasks_completed_arr = []
+        no_unreachable_locs_arr = []
+        print(f"Re-evaluating fitnesses for {pop_name}...")
+
+        if pop is not None:
+            for i, member in enumerate(pop):
+                print(f"Re-evaluating {i+1}/{len(pop)}...")
+                tasks_completed, no_unreachable_locs = evaluate(member, no_agents=no_agents, no_timesteps=no_timesteps)
+                no_unreachable_locs *= -1
+                tasks_completed_arr.append(tasks_completed)
+                no_unreachable_locs_arr.append(no_unreachable_locs)
+                # if i % 10 == 0:
+                #     vis_1 = VisGrid(member, (800, 400), 25, tick_time=0.2)
+                #     vis_1.save_to_png(f"final_grids/grid_{i}")
+                #     vis_1.window.close()
+
+        df_dict = {"tasks_completed":tasks_completed_arr, "no_unreachable_locs":no_unreachable_locs_arr}
+        df = pd.DataFrame.from_dict(df_dict)
+        df.to_csv(f"csvs/{pop_name}.csv")
+
+
+def draw_grids():
+    pop = None
+    with open("populations/pop_final.pkl", "rb") as f:
+        pop = pickle.load(f)
+
+    if pop is not None:
+        vis_1 = VisGrid(pop[62], (800, 400), 25, tick_time=0.2)
+        vis_1.window.getMouse()
+        vis_1.save_to_png(f"best/final_103")
+        vis_1.window.close()
+
+
+def animate_grid():
+    pop = None
+    with open("populations/pop_final.pkl", "rb") as f:
+        pop = pickle.load(f)
+
+    good_member = pop[26]
+    bad_member = pop[103]
+    grid = good_member
+
+    y_len = len(grid)
+    x_len = len(grid[0])
+
+    no_agents = 5
+    max_t = 250
+
+    non_task_endpoints = [(y, 0) for y in range(y_len)]
+    start_locs = non_task_endpoints[:no_agents]
+
+    tp = TokenPassing(grid, no_agents, start_locs, non_task_endpoints, max_t, task_frequency=1,
+                      is_logging_collisions=True)
+    final_agents = tp.compute()
+
+    vis = VisGrid(grid, (800, 400), 25, tick_time=0.2)
+    vis.window.getMouse()
+    vis.animate_mapd(final_agents, is_pos_xy=False)
+    vis.window.getMouse()
+
+
+def alt():
+    pop = None
+    with open("populations/pop_final.pkl", "rb") as f:
+        pop = pickle.load(f)
+
+    vis_1 = VisGrid(pop[0], (800, 400), 25, tick_time=0.2)
+    vis_1.save_to_png("grid_save")
+    vis_1.window.close()
+
+
+def main():
     # initialize ray to use the specified system resources
     ray.init()
 
     # create and train the population
-    # pop_size = 10  # 0
-    # n_generations = 10  # 0
-    # no_agents = 5
-    # no_timesteps = 500
-    # using_wandb = True
-    # log_interval = 2
-    # save_interval = 2
-    # mut_tile_size = 5
-    # mut_tile_no = 1
+    pop_size = 128  # 0
+    n_generations = 500  # 0
+    no_agents = 5
+    no_timesteps = 500
 
     config = {
         "pop_size": pop_size,
         "n_generations": n_generations,
-        "no_agents": n_agents,
-        "no_timesteps": n_timesteps,
-        "fitness": "unique_tasks_completed, reachable_locs",
-        "mut_tile_size": mut_tile_size,
-        "mut_tile_no": mut_tile_no,
-        "cluster_node": cluster_node,
-        "mate_func": "tiled_crossover"
+        "no_agents": no_agents,
+        "no_timesteps": no_timesteps,
+        "fitness": "unique_tasks_completed, no_reachable_locs",
+        "notes": "Seeing affect of increasing pop_size"
     }
-    # notes = "Test to see if this works :)"
-    if run_name == "":
-        run_name = None
+    wandb.init(project="GARuck", entity="simonrosen42", config=config)
+    # define our custom x axis metric
+    # wandb.define_metric("generation")
+    # # define which metrics will be plotted against it
+    # wandb.define_metric("tasks_completed", step_metric="generation")
+    # wandb.define_metric("no_unreachable_locs", step_metric="generation")
 
-    if using_wandb:
-        wandb.init(project="Test", entity="simonrosen42", config=config, notes=run_notes, name=run_name)
-
-        # define our custom x axis metric
-        wandb.define_metric("generation")
-        # define which metrics will be plotted against it
-        wandb.define_metric("perc_reachable_locs_max", step_metric="generation")
-        wandb.define_metric("perc_reachable_locs_mean", step_metric="generation")
-        wandb.define_metric("perc_reachable_locs_min", step_metric="generation")
-        wandb.define_metric("perc_reachable_locs_var", step_metric="generation")
-
-        wandb.define_metric("perc_reachable_locs_max", step_metric="generation")
-        wandb.define_metric("perc_reachable_locs_mean", step_metric="generation")
-        wandb.define_metric("perc_reachable_locs_min", step_metric="generation")
-        wandb.define_metric("perc_reachable_locs_var", step_metric="generation")
-
-    else:
-        log_interval = -1
-        save_interval = -1
-
-    module = WarehouseGAModule(population_size=pop_size,
-                               no_generations=n_generations, no_agents=n_agents,
-                               no_timesteps=n_timesteps,
-                               mut_tile_size=mut_tile_size, mut_tile_no=mut_tile_no,
-                               log_interval=log_interval, save_interval=save_interval)
-    trainer = Trainer(generations=n_generations, progress=True)
+    module = WarehouseGAModule(population_size=pop_size, no_generations=n_generations, no_agents=no_agents, no_timesteps=no_timesteps,
+                               log_interval=100, save_interval=250)
+    trainer = Trainer(generations=n_generations, progress=True, is_saving=False, file_suffix="populations/pop", save_interval=50)
     pop, logbook, halloffame = trainer.fit(module)
+    # pop_vals = [member.value for member in pop]
 
-    # Clean Up Local Files
-    wandb_dir = wandb.run.dir
-    wandb_dir = wandb_dir.split("\\")[:-2]
-    wandb_dir = "/".join(wandb_dir)
+    # with open("stats/hist.pkl", "wb") as f:
+    #     pickle.dump(logbook.history, f)
+    #
+    # with open("populations/pop_final.pkl", "wb") as f:
+    #     vals = [ray.get(member.value) for member in pop]
+    #     pickle.dump(vals, f)
 
-    wandb.finish()
-    shutil.rmtree(wandb_dir)
+    # # Not the best way to choose 'best' individuals but should give a reasonable idea of how well GA is performing
+    # sorted_members = sorted(pop, key=lambda x: x.fitness[0] + x.fitness[1])
+    # for i in range(5):
+    #     curr_grid = ray.get(sorted_members[i].value)
+    #     vis = VisGrid(curr_grid, (800, 400), 25, tick_time=0.2)
+    #     vis.save_to_png(f"best/best_grid_{i}")
+    #     vis.window.close()
+
+    print('initial stats:', logbook[0])
+    print('final stats:', logbook[-1])
+    # print('best member:', halloffame.members[0])
+
+    # best_member = halloffame.members[0]
+    # obj_ref = best_member.value
+    # best_grid = ray.get(obj_ref)
+    #
+    # for i, member in enumerate(halloffame.members):
+    #     curr_grid = ray.get(best_member.value)
+    #     vis = VisGrid(curr_grid, (800, 400), 25, tick_time=0.2)
+    #     vis.save_to_png(f"best/best_grid_{i}")
+    #     vis.window.close()
+    # print(type())
 
 
 if __name__ == "__main__":
-    # train()
-    parser = argparse.ArgumentParser()
-
-    parse_args = "pop_size,n_generations,n_agents,n_timesteps,mut_tile_size,mut_tile_no," \
-                 "cluster_node,run_notes,run_name," \
-                 "log_interval,save_interval"
-    parse_args = parse_args.split(",")
-
-    for parse_arg in parse_args:
-        parser.add_argument(parse_arg)
-    args = parser.parse_args()
-
-    pop_size = args.pop_size
-    n_generations = args.n_generations
-
-    n_agents = args.n_agents
-    n_timesteps = args.n_timesteps
-
-    mut_tile_size = args.mut_tile_size
-    mut_tile_no = args.mut_tile_no
-
-    run_notes = args.run_notes
-    run_name = args.run_name
-    cluster_node = args.cluster_node
-
-    log_interval = args.log_interval
-    save_interval = args.save_interval
-    using_wandb = True
-
-    train(pop_size, n_generations, n_agents,
-          n_timesteps, mut_tile_size, mut_tile_no,
-          using_wandb, log_interval, save_interval,
-          cluster_node,
-          run_notes, run_name)
-    # using_wandb, log_interval, save_interval,
-    # fitness_notes, mate_notes,
-    # cluster_node,
-    # run_notes, run_name
-    # main()
-
-    # TEST
-    # pop_size,n_generations,n_agents,n_timesteps,mut_tile_size,mut_tile_no,cluster_node,run_notes,run_name
-    # log_interval,save_interval
-
-    # python GARuck.py 10 10 5 500 4 1 -1 "Test" "Test Run" 2 2
+    # graph_fitnesses()
+    # animate_grid()
+    # draw_grids()
+    main()
+    # alt()
+    # test()
