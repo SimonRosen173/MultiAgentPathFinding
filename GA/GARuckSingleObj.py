@@ -260,15 +260,19 @@ class WarehouseGAModule(ruck.EaModule):
             }
             wandb.log(log_dict)
 
+        # act_values = [ray.get(obj_ref) for obj_ref in values]
+
         if self.save_interval > -1 and (self.eval_count == 0 or (self.eval_count + 1) % self.save_interval == 0 or self.eval_count + 1 == self.no_generations):
             # data = [[x, y] for (x, y) in out]
-            val_data = list(zip(values, out))
+            act_values = [ray.get(obj_ref) for obj_ref in values]
+            val_data = list(zip(act_values, out))
 
             # TEMP: Need to change this for when on cluster
             file_name = os.path.join(wandb.run.dir, f"pop_{self.eval_count+1}.pkl")
             with open(file_name, "wb") as f:
                 pickle.dump(val_data, f)
 
+            # wandb.save("/mnt/folder/file.h5", base_path="/mnt")
             wandb.save(file_name)
 
         self.eval_count += 1
@@ -287,15 +291,15 @@ def main():
     # initialize ray to use the specified system resources
     ray.init()
 
-    # create and train the population
-    pop_size = 64  # 0
-    n_generations = 100  # 0
+    # Params
+    pop_size = 512  # 0
+    n_generations = 2000  # 0
     no_agents = 5
     no_timesteps = 500
-    using_wandb = False
+    using_wandb = True
     log_interval = 250
     save_interval = 500
-    mut_tile_size = 5
+    mut_tile_size = 2
     mut_tile_no = 1
 
     config = {
@@ -308,7 +312,7 @@ def main():
         "mut_tile_no": mut_tile_no,
         "mate_func": "tiled_crossover"
     }
-    notes = "Trying new mutation operator - tiled_crossover"
+    notes = "Smaller tile size"
 
     if using_wandb:
         wandb.init(project="GARuck", entity="simonrosen42", config=config, notes=notes)
@@ -328,38 +332,11 @@ def main():
                                mut_tile_size=mut_tile_size, mut_tile_no=mut_tile_no,
                                log_interval=log_interval, save_interval=save_interval)
     trainer = Trainer(generations=n_generations, progress=True, is_saving=False, file_suffix="populations/pop")
+
     pop, logbook, halloffame = trainer.fit(module)
-    # pop_vals = [member.value for member in pop]
-
-    # with open("stats/hist.pkl", "wb") as f:
-    #     pickle.dump(logbook.history, f)
-    #
-    # with open("populations/pop_final.pkl", "wb") as f:
-    #     vals = [ray.get(member.value) for member in pop]
-    #     pickle.dump(vals, f)
-
-    # # Not the best way to choose 'best' individuals but should give a reasonable idea of how well GA is performing
-    # sorted_members = sorted(pop, key=lambda x: x.fitness[0] + x.fitness[1])
-    # for i in range(5):
-    #     curr_grid = ray.get(sorted_members[i].value)
-    #     vis = VisGrid(curr_grid, (800, 400), 25, tick_time=0.2)
-    #     vis.save_to_png(f"best/best_grid_{i}")
-    #     vis.window.close()
 
     print('initial stats:', logbook[0])
     print('final stats:', logbook[-1])
-    # print('best member:', halloffame.members[0])
-
-    # best_member = halloffame.members[0]
-    # obj_ref = best_member.value
-    # best_grid = ray.get(obj_ref)
-    #
-    # for i, member in enumerate(halloffame.members):
-    #     curr_grid = ray.get(best_member.value)
-    #     vis = VisGrid(curr_grid, (800, 400), 25, tick_time=0.2)
-    #     vis.save_to_png(f"best/best_grid_{i}")
-    #     vis.window.close()
-    # print(type())
 
 
 if __name__ == "__main__":
