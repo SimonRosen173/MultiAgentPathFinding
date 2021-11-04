@@ -350,7 +350,7 @@ def train(pop_size, n_generations, n_agents,
         run_name = None
 
     if using_wandb:
-        wandb.init(project="Test", entity="simonrosen42", config=config, notes=run_notes, name=run_name)
+        wandb.init(project="GARuck", entity="simonrosen42", config=config, notes=run_notes, name=run_name)
 
         # define our custom x axis metric
         wandb.define_metric("generation")
@@ -378,12 +378,12 @@ def train(pop_size, n_generations, n_agents,
     pop, logbook, halloffame = trainer.fit(module)
 
     # Clean Up Local Files
-    wandb_dir = wandb.run.dir
-    wandb_dir = wandb_dir.split("\\")[:-2]
-    wandb_dir = "/".join(wandb_dir)
+    # wandb_dir = wandb.run.dir
+    # wandb_dir = wandb_dir.split("\\")[:-2]
+    # wandb_dir = "/".join(wandb_dir)
 
     wandb.finish()
-    shutil.rmtree(wandb_dir)
+    # shutil.rmtree(wandb_dir)
 
 
 if __name__ == "__main__":

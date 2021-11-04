@@ -35,3 +35,8 @@ if __name__ == "__main__":
           using_wandb, log_interval, save_interval,
           cluster_node,
           run_notes, run_name)
+          
+# pop_size,n_generations,n_agents,n_timesteps,mut_tile_size,mut_tile_no
+# cluster_node,run_notes,run_name
+# log_interval,save_interval
+# python3 ga_train.py 64 100 5 500 4 1 -1 "Test" ""

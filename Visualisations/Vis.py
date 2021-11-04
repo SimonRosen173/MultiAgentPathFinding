@@ -1,4 +1,3 @@
-from graphics import *
 from PIL import Image
 import os
 import time
@@ -11,6 +10,7 @@ from typing import List, Tuple, Optional, Dict, Set
 class VisGrid:
     def __init__(self, grid, window_dim, border_width=25, line_width=1, tick_time=0.1,
                  agent_color="blue", path_width=3, text_size=20):
+
         self.grid = grid
         self.win_width = window_dim[0]
         self.win_height = window_dim[1]
@@ -293,6 +293,7 @@ def example():
 
 
 if __name__ == "__main__":
+    from graphics import *
     example()
     # win = GraphWin(width=350, height=350)
     # Point(100, 50).draw(win)

@@ -331,12 +331,12 @@ def main():
                                no_timesteps=no_timesteps,
                                mut_tile_size=mut_tile_size, mut_tile_no=mut_tile_no,
                                log_interval=log_interval, save_interval=save_interval)
-    trainer = Trainer(generations=n_generations, progress=True, is_saving=False, file_suffix="populations/pop")
+    trainer = Trainer(generations=n_generations, progress=True)
 
     pop, logbook, halloffame = trainer.fit(module)
 
-    print('initial stats:', logbook[0])
-    print('final stats:', logbook[-1])
+    # print('initial stats:', logbook[0])
+    # print('final stats:', logbook[-1])
 
 
 if __name__ == "__main__":

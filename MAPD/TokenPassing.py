@@ -5,7 +5,6 @@ from typing import Type, Tuple, List, Set, Optional, Dict
 from GlobalObjs.GraphNX import GridGraph, plot_graph
 from Benchmark import Warehouse
 # from Cooperative_AStar.CooperativeAStar import cooperative_astar_path, man_dist
-from Visualisations.Vis import VisGrid
 from MAPD.Agent import Agent
 from MAPD.TaskAssigner import TaskAssigner, Task
 from Cooperative_AStar.CooperativeAStar import cooperative_astar_path_fast
@@ -64,7 +63,7 @@ class Token:
             self._stationary_list[agent_id].append((pos, start_t, np.inf))
 
     # pos only required for error checking
-    def _update_last_end_t(self, agent_id: int, pos: tuple[int, int], end_t: int):
+    def _update_last_end_t(self, agent_id: int, pos: Tuple[int, int], end_t: int):
         last_stationary = self._stationary_list[agent_id][-1]
         assert last_stationary[0] == pos, f"{last_stationary[0]} != {pos} - pos specified must correspond to last element in _stationary_list[agent_id]"
         last_stationary = (last_stationary[0], last_stationary[1], end_t)
@@ -375,6 +374,7 @@ class TokenPassing:
 
 
 def visualise_paths(grid, agents: List[Agent]):
+    from Visualisations.Vis import VisGrid
     full_paths = []
     for agent in agents:
         full_path = agent.get_full_path()
