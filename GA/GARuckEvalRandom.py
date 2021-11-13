@@ -28,145 +28,23 @@ OPT_GRID_SHAPE = (22, 44)
 NO_LOCS = OPT_GRID_SHAPE[0] * OPT_GRID_SHAPE[1]
 STATIC_LOCS_NO = OPT_GRID_SHAPE[0] * opt_grid_start_x
 
+urg = Warehouse.UniformRandomGrid()
+
 # CROSSOVER_TILE_SIZE = 5
 # CROSSOVER_TILE_NO = 1
 
 
-@njit
-def mutate_flip_bits(a: np.ndarray, p: float = 0.05) -> np.ndarray:
-    return a ^ (np.random.random(a.shape) < p)
-
-
-@njit
-def one_point_crossover_2d(arr_1: np.ndarray, arr_2: np.ndarray,
-                           crossover_point: Tuple[int, int]) -> Tuple[np.ndarray, np.ndarray]:
-    c_pt = crossover_point
-    # print(f"arr_1 no of storage locs: {np.count_nonzero(arr_1)}")
-    # print(f"arr_2 no of storage locs: {np.count_nonzero(arr_2)}")
-    c_arr_1 = arr_1.copy()
-    c_arr_2 = arr_2.copy()
-
-    tl_slices = (slice(None, c_pt[0]), slice(None, c_pt[0]))
-    tr_slices = (slice(None, c_pt[0]), slice(c_pt[0], None))
-    bl_slices = (slice(c_pt[0], None), slice(None, c_pt[0]))
-    br_slices = (slice(c_pt[0], None), slice(c_pt[0], None))
-
-    slices = None
-    rand_quad = np.random.randint(0, 4)  # Randomly choose which quadrant to do crossover off
-    if rand_quad == 0:
-        slices = tl_slices
-    elif rand_quad == 1:
-        slices = tr_slices
-    elif rand_quad == 2:
-        slices = bl_slices
-    else:
-        slices = br_slices
-
-    c_arr_1[slices] = arr_2[slices].copy()
-    c_arr_2[slices] = arr_1[slices].copy()
-
-    # print(f"c_arr_1 no of storage locs: {np.count_nonzero(c_arr_1)}")
-    # print(f"c_arr_2 no of storage locs: {np.count_nonzero(c_arr_2)}")
-
-    return c_arr_1, c_arr_2
-
-
-@njit
-def tiled_crossover(arr_1, arr_2, tile_size, no_tiles=1):
-    assert arr_1.shape == arr_2.shape, "Arrays must be of same shape"
-
-    max_y = arr_1.shape[0] - tile_size
-    max_x = arr_1.shape[1] - tile_size
-    new_arr_1 = arr_1.copy()
-    new_arr_2 = arr_2.copy()
-
-    for i in range(no_tiles):
-        x = np.random.randint(0, max_x + 1)
-        y = np.random.randint(0, max_y + 1)
-        slices = (slice(y, y+tile_size), slice(x, x+tile_size))
-
-        new_arr_1[slices] = arr_2[slices].copy()
-        new_arr_2[slices] = arr_1[slices].copy()
-
-    return new_arr_1, new_arr_2
-
-
-@njit
-def regain_no_storage_locs(arr: np.ndarray) -> np.ndarray:
-    no_storage_locs = np.count_nonzero(arr)
-
-    if no_storage_locs < NO_STORAGE_LOCS:
-        while no_storage_locs < NO_STORAGE_LOCS:
-            y = np.random.randint(0, arr.shape[0])
-            x = np.random.randint(0, arr.shape[1])
-            if arr[y, x] == 0:
-                arr[y, x] = 1
-                no_storage_locs += 1
-    elif no_storage_locs > NO_STORAGE_LOCS:
-        while no_storage_locs > NO_STORAGE_LOCS:
-            y = np.random.randint(0, arr.shape[0])
-            x = np.random.randint(0, arr.shape[1])
-            if arr[y, x] == 1:
-                arr[y, x] = 0
-                no_storage_locs -= 1
-
-    return arr
-
-
 def mate(arr_1: np.ndarray, arr_2: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    return mate_njit(arr_1, arr_2)
-
-
-@njit
-def mate_njit(arr_1: np.ndarray, arr_2: np.ndarray, tile_size, tile_no=1) -> Tuple[np.ndarray, np.ndarray]:
-    static_arr_1 = arr_1[:, :opt_grid_start_x]
-    static_arr_2 = arr_2[:, :opt_grid_start_x]
-    opt_arr_1 = arr_1[:, opt_grid_start_x:]
-    opt_arr_2 = arr_2[:, opt_grid_start_x:]
-
-    # c_pt = (opt_arr_1.shape[0]//2, opt_arr_1.shape[1]//2)
-    # opt_c_arr_1, opt_c_arr_2 = one_point_crossover_2d(opt_arr_1, opt_arr_2, c_pt)
-
-    opt_c_arr_1, opt_c_arr_2 = tiled_crossover(opt_arr_1, opt_arr_2, tile_size, tile_no)
-
-    # Can't use concatenate cause of njit
-    new_shape = (static_arr_1.shape[0], static_arr_1.shape[1] + opt_c_arr_1.shape[1])
-    c_arr_1 = np.zeros(new_shape)
-    c_arr_2 = np.zeros(new_shape)
-    c_arr_1[:, :static_arr_1.shape[1]] = static_arr_1
-    c_arr_1[:, static_arr_1.shape[1]:] = opt_c_arr_1
-    c_arr_2[:, :static_arr_1.shape[1]] = static_arr_2
-    c_arr_2[:, static_arr_1.shape[1]:] = opt_c_arr_2
-    # c_arr_1 = np.concatenate([static_arr_1, opt_c_arr_1], axis=1)
-    # c_arr_2 = np.concatenate([static_arr_2, opt_c_arr_2], axis=1)
-    # return c_arr_1, c_arr_2
     return arr_1, arr_2
 
 
-# @njit
 def mutate(arr: np.ndarray) -> np.ndarray:
-    static_arr = arr[:, :opt_grid_start_x]
-    opt_arr = arr[:, opt_grid_start_x:]
-
-    opt_arr = opt_arr.astype(bool)
-    opt_arr = mutate_flip_bits(opt_arr)
-    opt_arr = opt_arr.astype(int)
-
-    # Need to retain number of storage locs
-    opt_arr = regain_no_storage_locs(opt_arr)
-
-    # Can't use concatenate cause of njit
-    new_shape = (static_arr.shape[0], static_arr.shape[1] + opt_arr.shape[1])
-    arr = np.zeros(new_shape)
-    arr[:, :static_arr.shape[1]] = static_arr
-    arr[:, static_arr.shape[1]:] = opt_arr
-
     return arr
 
 
 def evaluate(values: np.ndarray, no_agents: int, no_timesteps: int):
     try:
-        grid: List = values.tolist()  # This is a list, why PyCharm...
+        grid: List = urg.get_uniform_random_grid(OPT_GRID_SHAPE, NO_STORAGE_LOCS)# This is a list, why PyCharm...
         y_len = len(grid)
         x_len = len(grid[0])
 
@@ -217,18 +95,13 @@ class WarehouseGAModule(ruck.EaModule):
         self.mut_tile_no = mut_tile_no
         self.mut_tile_size = mut_tile_size
 
-        # self.train_loop_func = partial(train_loop_func, self)
-        def _mate(arr_1: np.ndarray, arr_2: np.ndarray):
-            return mate_njit(arr_1, arr_2,
-                             tile_size=self.mut_tile_size, tile_no=self.mut_tile_no)
-
         # implement the required functions for `EaModule`
         self.generate_offspring, self.select_population = R.make_ea(
             mode=self.hparams.ea_mode,
             offspring_num=self.hparams.offspring_num,
             # decorate the functions with `ray_remote_put` which automatically
             # `ray.get` arguments that are `ObjectRef`s and `ray.put`s returned results
-            mate_fn=ray_remote_puts(_mate).remote,
+            mate_fn=ray_remote_puts(mate).remote,
             mutate_fn=ray_remote_put(mutate).remote,
             # efficient to compute locally
             # select_fn=functools.partial(R.select_tournament, k=3),
@@ -310,13 +183,11 @@ class WarehouseGAModule(ruck.EaModule):
     #     pass
 
     def gen_starting_values(self):
-        urg = Warehouse.UniformRandomGrid()
         return [ray.put(urg.get_uniform_random_grid(OPT_GRID_SHAPE, NO_STORAGE_LOCS))
                 for _ in range(self.hparams.population_size)]
 
 
-def train(pop_size, n_generations, n_agents,
-          n_timesteps, mut_tile_size, mut_tile_no,
+def train(pop_size, n_generations, n_agents, n_timesteps,
           using_wandb, log_interval, save_interval,
           cluster_node,
           run_notes, run_name):
@@ -340,10 +211,8 @@ def train(pop_size, n_generations, n_agents,
         "no_agents": n_agents,
         "no_timesteps": n_timesteps,
         "fitness": "unique_tasks_completed, reachable_locs",
-        "mut_tile_size": mut_tile_size,
-        "mut_tile_no": mut_tile_no,
         "cluster_node": cluster_node,
-        "mate_func": "tiled_crossover"
+        "mate_func": "none"
     }
     # notes = "Test to see if this works :)"
     if run_name == "":
@@ -372,7 +241,7 @@ def train(pop_size, n_generations, n_agents,
     module = WarehouseGAModule(population_size=pop_size,
                                no_generations=n_generations, no_agents=n_agents,
                                no_timesteps=n_timesteps,
-                               mut_tile_size=mut_tile_size, mut_tile_no=mut_tile_no,
+                               mut_tile_size=1, mut_tile_no=1,  # Not used so it doesn't matter the value
                                log_interval=log_interval, save_interval=save_interval)
     trainer = Trainer(generations=n_generations, progress=True)
     pop, logbook, halloffame = trainer.fit(module)
@@ -390,7 +259,7 @@ if __name__ == "__main__":
     # train()
     parser = argparse.ArgumentParser()
 
-    parse_args = "pop_size,n_generations,n_agents,n_timesteps,mut_tile_size,mut_tile_no," \
+    parse_args = "pop_size,n_generations,n_agents,n_timesteps," \
                  "cluster_node,run_notes,run_name," \
                  "log_interval,save_interval"
     parse_args = parse_args.split(",")
@@ -405,9 +274,6 @@ if __name__ == "__main__":
     n_agents = int(args.n_agents)
     n_timesteps = int(args.n_timesteps)
 
-    mut_tile_size = int(args.mut_tile_size)
-    mut_tile_no = int(args.mut_tile_no)
-
     run_notes = args.run_notes
     run_name = args.run_name
     cluster_node = args.cluster_node
@@ -416,13 +282,7 @@ if __name__ == "__main__":
     save_interval = int(args.save_interval)
     using_wandb = True
 
-    print(f"Parameters:")
-    print(f"pop_size: {pop_size}, n_generations: {n_generations}")
-    print(f"n_agents: {n_agents}, n_timesteps: {n_timesteps}")
-    print(f"mut_tile_size: {mut_tile_size}, mut_tile_no: {mut_tile_no}")
-
-    train(pop_size, n_generations, n_agents,
-          n_timesteps, mut_tile_size, mut_tile_no,
+    train(pop_size, n_generations, n_agents, n_timesteps,
           using_wandb, log_interval, save_interval,
           cluster_node,
           run_notes, run_name)
@@ -435,7 +295,5 @@ if __name__ == "__main__":
     # TEST
     # pop_size,n_generations,n_agents,n_timesteps,mut_tile_size,mut_tile_no,cluster_node,run_notes,run_name
     # log_interval,save_interval
-
-    # 16 10 5 500 4 1 -1 "Testing scaling of pop size compared to number of cores. Cores = 16" "Pop-Core Scaling - 16" 2 2
 
     # python GARuck.py 10 10 5 500 4 1 -1 "Test" "Test Run" 2 2
